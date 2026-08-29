@@ -224,7 +224,7 @@ export default function RegionView({
 
       {/* ---- header ---- */}
       <motion.header
-        className="relative z-10 flex items-start justify-between px-6 pt-8 pr-16 md:px-14"
+        className="relative z-10 flex items-start justify-between py-8 pr-6 pl-16 md:pl-20"
         initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.25, duration: 0.7 }}
@@ -326,6 +326,11 @@ export default function RegionView({
           </motion.button>
         </div>
 
+        {dictation.error && (
+          <p className="mx-auto mb-2 max-w-3xl text-center text-[0.55rem] tracking-[0.25em] text-red-300/70 uppercase">
+            {dictation.error}
+          </p>
+        )}
         <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-2.5 pr-2.5 pl-3 backdrop-blur-md sm:gap-4 sm:pl-4">
           <button onClick={onProfile} aria-label="Your soul" className="shrink-0">
             <Avatar soul={soul} size={34} speaking={draft.length > 0} />

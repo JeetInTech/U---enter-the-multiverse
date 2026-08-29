@@ -274,11 +274,12 @@ export default function U() {
       {stage !== "enter" && (
         <motion.button
           onClick={() => setMuted(!isMuted())}
-          className="absolute top-5 right-5 z-40 grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/40 text-mist/50 backdrop-blur-md transition-colors hover:border-white/30 hover:text-white md:top-auto md:right-8 md:bottom-8"
+          className="absolute top-5 left-5 z-50 grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/40 text-mist/50 backdrop-blur-md transition-colors hover:border-white/30 hover:text-white md:top-6 md:left-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           whileTap={{ scale: 0.9 }}
-          aria-label={muted ? "Unmute the multiverse" : "Mute the multiverse"}
+          aria-label={muted ? "Unmute the music" : "Mute the music"}
+          title={muted ? "Unmute the music" : "Mute the music"}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
             <path d="M4 9v6h4l5 4V5L8 9H4z" strokeLinejoin="round" />
