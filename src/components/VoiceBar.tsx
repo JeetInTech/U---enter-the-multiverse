@@ -87,8 +87,14 @@ export default function VoiceBar({
       </div>
 
       {error && (
-        <p className="text-[0.55rem] tracking-[0.3em] text-red-300/60 uppercase">
-          {error} — check the browser let this page listen
+        <p className="max-w-xs text-center text-[0.55rem] leading-relaxed tracking-[0.25em] text-red-300/70 uppercase">
+          {error}
+        </p>
+      )}
+
+      {joined && speakers.length < 2 && (
+        <p className="text-[0.5rem] tracking-[0.3em] text-mist/30 uppercase">
+          you are the only voice here
         </p>
       )}
     </div>
@@ -136,6 +142,15 @@ function Talking({ s, big }: { s: Speaker; big: boolean }) {
         {s.name}
         {s.me ? " · you" : ""}
       </span>
+      {/* say plainly whether the line is actually open */}
+      {!s.me && s.state !== "connected" && (
+        <span
+          className="text-[0.42rem] tracking-[0.2em] uppercase"
+          style={{ color: s.state === "failed" ? "#ff8a8a" : "#6b7590" }}
+        >
+          {s.state === "failed" ? "could not connect" : "connecting"}
+        </span>
+      )}
     </motion.div>
   );
 }
