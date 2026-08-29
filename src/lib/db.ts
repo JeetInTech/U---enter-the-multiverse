@@ -40,26 +40,39 @@ export async function me(): Promise<SoulRow | null> {
   return data ?? null;
 }
 
+/** A brand new anonymous identity, discarding whatever was stored before. */
+async function freshSession(c: SupabaseClient) {
+  await c.auth.signOut({ scope: "local" });
+  const { data, error } = await c.auth.signInAnonymously();
+  if (error) throw error;
+  return data.session;
+}
+
 /** Sign in anonymously and write the soul. Returns its id, or null when there is no db. */
 export async function arrive(soul: Omit<SoulRow, "id">): Promise<string | null> {
   const c = db();
   if (!c) return null;
-  let {
-    data: { session },
-  } = await c.auth.getSession();
-  if (!session) {
-    const { data, error } = await c.auth.signInAnonymously();
-    if (error) throw error;
-    session = data.session;
-  }
+
+  const write = (userId: string) =>
+    c
+      .from("souls")
+      .upsert({ user_id: userId, ...soul }, { onConflict: "user_id" })
+      .select("id")
+      .single();
+
+  let session = (await c.auth.getSession()).data.session ?? (await freshSession(c));
   if (!session) return null;
-  const { data, error } = await c
-    .from("souls")
-    .upsert({ user_id: session.user.id, ...soul }, { onConflict: "user_id" })
-    .select("id")
-    .single();
+
+  let { data, error } = await write(session.user.id);
+  // a stored token outlives its user if the account was deleted or the project reset;
+  // getSession only decodes what is in local storage, so the first write is how we find out
+  if (error?.code === "23503") {
+    session = await freshSession(c);
+    if (!session) return null;
+    ({ data, error } = await write(session.user.id));
+  }
   if (error) throw error;
-  return data.id;
+  return data!.id;
 }
 
 /* ---------- the feed ---------- */

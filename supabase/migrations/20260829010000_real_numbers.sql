@@ -22,3 +22,8 @@ select
   count(*)::int                as voices
 from public.messages
 group by region;
+
+-- ---------- optional: empty the world completely ----------
+-- The twelve founding souls are the world's opening content, not test data, so they stay.
+-- Uncomment to remove them too — every room then starts silent.
+-- delete from public.souls where user_id is null;

@@ -27,6 +27,7 @@ corner. Point it at a database and the world starts remembering.
 | `messages` | one per region, 400 chars, tied to a soul |
 | `resonances` | a vibration, not a like — primary key `(message, soul)`, so once each |
 | `discoveries` | which lore fragments a soul has recovered; six of them opens The Void |
+| `region_stats` | a view: how many souls have spoken in each region, and how much |
 
 RLS: souls and messages are readable by everyone, writable only as yourself; discoveries are readable
 only by the soul that found them. Realtime carries new messages and resonances; Supabase Presence gives
@@ -55,6 +56,24 @@ Everything else in the file is world data: regions, palettes, auras, lore, rank 
 ```bash
 npm test   # geometry + rank invariants
 ```
+
+## Deploying (Netlify)
+
+There is no separate backend. Every page is prerendered static HTML and all the data work happens in the
+browser against Supabase, so the whole thing is a static site plus a database somebody else runs.
+
+1. Push the repo and point Netlify at it — it detects Next.js on its own, no `netlify.toml` needed.
+2. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` under **Site configuration →
+   Environment variables**, before the first build.
+3. These are inlined into the bundle at build time, not read at runtime, so after adding or changing them
+   you must **Clear cache and deploy site** — a plain redeploy can reuse the old bundle. If the corner of
+   the live site says `no database · seeded multiverse`, this step is what is missing: every visitor is
+   then talking to their own browser and nobody can see anyone else.
+
+Nothing is needed on the Supabase side — anonymous sign-in uses no redirect URLs.
+
+If you ever want to drop the Next runtime entirely, `output: "export"` in `next.config.ts` makes it a
+folder of files that any static host will serve — nothing in the app needs a server.
 
 ## Not built
 
