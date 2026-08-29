@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# U — enter the multiverse
 
-## Getting Started
-
-First, run the development server:
+The BELLE brief, built. Next.js 16 (App Router, Turbopack) · React 19 · Tailwind 4 · Motion 13 · Supabase.
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+With no Supabase env vars set it runs on the seeded multiverse in `src/lib/soul.ts` and says so in the
+corner. Point it at a database and the world starts remembering.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Connect the database
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Create a Supabase project, then **Authentication → Sign In / Providers → Anonymous sign-ins: on**.
+   Souls arrive without an email, a password, or a real name — that is the whole idea.
+2. Run the schema: `supabase link --project-ref <ref> && supabase db push`, or paste
+   `supabase/migrations/20260829000000_init.sql` into the SQL editor. It creates the tables, the RLS
+   policies, realtime, and the twelve founding souls so the rooms are not empty on day one.
+3. `cp .env.local.example .env.local` and fill in the Project URL and the anon/publishable key from
+   **Project Settings → API**. Never the `service_role` key — this app is entirely client-side.
 
-## Learn More
+## What is stored
 
-To learn more about Next.js, take a look at the following resources:
+| Table | Holds |
+| --- | --- |
+| `souls` | shape, colour, aura, name, tagline. `user_id` is null for the founding souls |
+| `messages` | one per region, 400 chars, tied to a soul |
+| `resonances` | a vibration, not a like — primary key `(message, soul)`, so once each |
+| `discoveries` | which lore fragments a soul has recovered; six of them opens The Void |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+RLS: souls and messages are readable by everyone, writable only as yourself; discoveries are readable
+only by the soul that found them. Realtime carries new messages and resonances; Supabase Presence gives
+each region its live "N present" count.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## The journey
 
-## Deploy on Vercel
+`src/app/page.tsx` is a five-stage machine — `enter → forge → arrive → map → region` — swapped through one
+`AnimatePresence`, so each screen dissolves into the next rather than cutting. A returning soul skips the
+forge and lands straight on the map.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Screen | File | The animation that carries it |
+| --- | --- | --- |
+| Landing | `components/Landing.tsx` | Cursor-parallax 3D tilt on the word, a ring that keeps leaving, and a warp through the starfield when you step in |
+| Soul forge | `components/SoulForge.tsx` | Your avatar *morphs* between shapes — circle melts into crescent — while the whole world recolours to your soul |
+| Arrival | `page.tsx` | The avatar flies in on a shared `layoutId` and the welcome lines surface one at a time |
+| Multiverse | `components/Multiverse.tsx` | Cards tilt in 3D under the cursor with a light that follows it; clicking one grows it into the room |
+| A region | `components/RegionView.tsx` | Messages spring in live, resonance makes them glow brighter, and a fragment of lore glimmers somewhere in the room |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## How the shapes morph
+
+`src/lib/soul.ts` samples every shape — circle, triangle, diamond, star, crescent (a real
+circle-minus-circle arc) — to the same 96 points, so one `d` string interpolates smoothly into the next.
+Everything else in the file is world data: regions, palettes, auras, lore, rank thresholds.
+
+```bash
+npm test   # geometry + rank invariants
+```
+
+## Not built
+
+Voice channels (Agora/Daily), 3D avatars (three.js), mobile/AR/VR, the monthly Awakening event, guardian
+moderation tools, pre-launch email capture. Everything else in the brief is here.

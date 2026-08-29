@@ -1,69 +1,261 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { AnimatePresence, motion } from "motion/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Avatar from "@/components/Avatar";
+import Landing from "@/components/Landing";
+import Multiverse from "@/components/Multiverse";
+import RegionView from "@/components/RegionView";
+import SoulForge, { type Soul } from "@/components/SoulForge";
+import Starfield from "@/components/Starfield";
+import {
+  arrive,
+  hasDb,
+  loadLore,
+  loadStats,
+  me as loadMe,
+  recordLore,
+  watchPresence,
+  type Stats,
+} from "@/lib/db";
+import { TAGLINES, colorOf, rankFor, regionOf, type Region } from "@/lib/soul";
+
+type Stage = "enter" | "forge" | "arrive" | "map" | "region";
+
+export default function U() {
+  const [stage, setStage] = useState<Stage>("enter");
+  const [warp, setWarp] = useState(0);
+  const [found, setFound] = useState<number[]>([]);
+  const [soulId, setSoulId] = useState<string | null>(null);
+  const [returning, setReturning] = useState(false);
+  const [region, setRegion] = useState<Region | null>(null);
+  const [stats, setStats] = useState<Stats>({});
+  const [presence, setPresence] = useState<Record<string, number>>({});
+  const presenceRef = useRef<ReturnType<typeof watchPresence> | null>(null);
+  const [soul, setSoul] = useState<Soul>({
+    name: "",
+    tagline: TAGLINES[0],
+    shape: "circle",
+    color: "tide",
+    aura: "glow",
+  });
+
+  const lore = found.length;
+  const mine = colorOf(soul.color);
+  const here = stage === "region" && region ? region : null;
+  const tint = here ?? { hex: mine.hex, glow: mine.glow, bg: "#04040a" };
+
+  // the whole world takes on the colour of wherever you are
+  useEffect(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--hue", tint.hex);
+    root.setProperty("--hue-glow", tint.glow);
+    root.setProperty("--hue-bg", tint.bg);
+  }, [tint.hex, tint.glow, tint.bg]);
+
+  // a soul this browser has already made comes back as itself, with what it found
+  useEffect(() => {
+    loadMe()
+      .then(async (s) => {
+        if (!s) return;
+        setSoul({ name: s.name, tagline: s.tagline, shape: s.shape, color: s.color, aura: s.aura });
+        setSoulId(s.id);
+        setReturning(true);
+        setFound(await loadLore(s.id));
+      })
+      .catch(() => {});
+  }, []);
+
+  // how much has ever happened in each region — refreshed each time you surface
+  useEffect(() => {
+    if (stage !== "map") return;
+    loadStats().then(setStats).catch(() => {});
+  }, [stage]);
+
+  // one presence channel for the whole multiverse; it follows you from room to room
+  useEffect(() => {
+    const watch = watchPresence(soulId ? { id: soulId, name: soul.name } : null, setPresence);
+    presenceRef.current = watch;
+    return () => {
+      presenceRef.current = null;
+      watch.stop();
+    };
+  }, [soulId, soul.name]);
+
+  useEffect(() => {
+    presenceRef.current?.where(stage === "region" ? (region?.id ?? null) : null);
+  }, [stage, region?.id]);
+
+  const stepIn = () => {
+    setWarp(1);
+    setTimeout(() => setWarp(0), 1600);
+  };
+
+  const become = useCallback(async () => {
+    setStage("arrive");
+    stepIn();
+    // no database configured (or anonymous sign-in is off): the world still runs, locally
+    const id = await arrive(soul).catch((e) => {
+      console.warn("U: arriving without a database —", e.message);
+      return null;
+    });
+    if (id) setSoulId(id);
+  }, [soul]);
+
+  const keepLore = useCallback(
+    (index: number) => {
+      setFound((f) => (f.includes(index) ? f : [...f, index]));
+      if (soulId) recordLore(soulId, index).catch(() => {});
+    },
+    [soulId],
+  );
+
+  const enterRegion = (r: Region) => {
+    setRegion(r);
+    setStage("region");
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="grain relative h-dvh w-full overflow-hidden">
+      <Starfield color={tint.glow} warp={warp} count={stage === "enter" ? 260 : 170} />
+
+      {/* ambient wash that follows the region */}
+      <motion.div
+        className="pointer-events-none absolute inset-0"
+        animate={{
+          background: `radial-gradient(120% 90% at 50% 110%, ${tint.hex}22, transparent 60%)`,
+        }}
+        transition={{ duration: 1.4 }}
+      />
+
+      <AnimatePresence mode="wait">
+        {stage === "enter" && (
+          <Landing
+            key="enter"
+            onStepIn={stepIn}
+            onEnter={() => setStage(returning ? "map" : "forge")}
+          />
+        )}
+
+        {stage === "forge" && (
+          <SoulForge
+            key="forge"
+            soul={soul}
+            setSoul={setSoul}
+            onDone={become}
+          />
+        )}
+
+        {stage === "arrive" && (
+          <Arrival key="arrive" soul={soul} onDone={() => setStage("map")} />
+        )}
+
+        {stage === "map" && (
+          <Multiverse
+            key="map"
+            lore={lore}
+            stats={stats}
+            presence={presence}
+            onOpen={enterRegion}
+          />
+        )}
+
+        {stage === "region" && region && (
+          <RegionView
+            key={`region-${region.id}`}
+            region={regionOf(region.id)}
+            soul={soul}
+            soulId={soulId}
+            found={found}
+            present={presence[region.id] ?? 1}
+            onLore={keepLore}
+            onLeave={() => setStage("map")}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* say plainly when the world is not persisting */}
+      {!hasDb && (
+        <p className="pointer-events-none absolute right-4 bottom-4 z-40 text-[0.52rem] tracking-[0.28em] text-mist/25 uppercase">
+          no database · seeded multiverse
+        </p>
+      )}
+
+      {/* ---- the soul you are carrying ---- */}
+      <AnimatePresence>
+        {stage === "map" && (
+          <motion.aside
+            className="pointer-events-none absolute bottom-6 left-6 z-40 flex items-center gap-3 rounded-full border border-white/10 bg-black/40 py-2 pr-5 pl-2 backdrop-blur-md md:bottom-8 md:left-8"
+            initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ delay: 0.5, duration: 0.6 }}
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <Avatar soul={soul} size={38} layoutId="me" />
+            <div className="leading-tight">
+              <p className="font-display text-lg" style={{ color: mine.glow }}>
+                {soul.name || "unnamed"}
+              </p>
+              <p className="text-[0.56rem] uppercase tracking-[0.28em] text-mist/45">
+                {rankFor(lore)} · {lore} fragments
+              </p>
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
+    </main>
+  );
+}
+
+/* ---------- first arrival in The Luminous Fields ---------- */
+
+function Arrival({ soul, onDone }: { soul: Soul; onDone: () => void }) {
+  const lines = [
+    "Welcome, traveler.",
+    "You have arrived.",
+    "Now… become.",
+  ];
+  return (
+    <motion.div
+      className="relative flex h-full w-full flex-col items-center justify-center px-6 text-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, filter: "blur(16px)", scale: 1.06 }}
+      transition={{ duration: 0.9 }}
+    >
+      <motion.div
+        initial={{ scale: 0.4, opacity: 0, y: 40 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 70, damping: 16, delay: 0.3 }}
+      >
+        <Avatar soul={soul} size={150} layoutId="me" speaking />
+      </motion.div>
+
+      <div className="mt-14 space-y-1">
+        {lines.map((l, i) => (
+          <motion.p
+            key={l}
+            className="font-display text-3xl md:text-4xl"
+            initial={{ opacity: 0, y: 18, filter: "blur(12px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ delay: 1 + i * 0.7, duration: 1.1, ease: [0.16, 1, 0.3, 1] }}
           >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+            {l}
+          </motion.p>
+        ))}
+      </div>
+
+      <motion.button
+        onClick={onDone}
+        className="mt-16 rounded-full border border-white/20 px-9 py-3.5 text-[0.62rem] uppercase tracking-[0.35em] text-white/80 transition-colors hover:border-white/50 hover:text-white"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 3.4, duration: 1 }}
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.97 }}
+      >
+        Wander
+      </motion.button>
+    </motion.div>
   );
 }
