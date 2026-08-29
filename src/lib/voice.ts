@@ -10,8 +10,27 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client } from "@/lib/db";
 
+// STUN only tells each side its public address. When both sides sit behind a NAT
+// that rewrites ports per destination — mobile data, most campus and office wifi —
+// there is no direct path to find and ICE fails outright. A TURN server relays the
+// stream instead. It cannot listen in: WebRTC media is encrypted end to end (DTLS-SRTP),
+// so a relay only ever forwards ciphertext.
+const TURN_URL = process.env.NEXT_PUBLIC_TURN_URL;
+const TURN_USER = process.env.NEXT_PUBLIC_TURN_USER;
+const TURN_PASS = process.env.NEXT_PUBLIC_TURN_PASS;
+
+export const hasRelay = Boolean(TURN_URL);
+
+const RELAYS: RTCIceServer[] = TURN_URL
+  ? [{ urls: TURN_URL.split(","), username: TURN_USER, credential: TURN_PASS }]
+  : [];
+
 const ICE: RTCConfiguration = {
-  iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+    ...RELAYS,
+  ],
+  iceCandidatePoolSize: 4,
 };
 
 const log = (...a: unknown[]) => console.info("U voice:", ...a);
@@ -71,6 +90,8 @@ export function useVoice(
   const audios = useRef(new Map<string, HTMLAudioElement>());
   const meters = useRef(new Map<string, () => number>());
   const states = useRef(new Map<string, RTCPeerConnectionState>());
+  const retried = useRef(new Set<string>());
+  const kinds = useRef(new Set<string>());
   const who = useRef(new Map<string, Who>());
   const channel = useRef<RealtimeChannel | null>(null);
   const ac = useRef<AudioContext | null>(null);
@@ -111,6 +132,8 @@ export function useVoice(
   const teardown = useCallback(() => {
     cancelAnimationFrame(raf.current);
     [...peers.current.keys()].forEach(drop);
+    retried.current.clear();
+    kinds.current.clear();
     who.current.clear();
     stream.current?.getTracks().forEach((t) => t.stop());
     stream.current = null;
@@ -129,6 +152,12 @@ export function useVoice(
       stream.current.getTracks().forEach((t) => pc.addTrack(t, stream.current!));
 
       pc.onicecandidate = (e) => {
+        // knowing which kinds were gathered is the whole diagnosis when a call fails:
+        // host = same network, srflx = through NAT, relay = via TURN
+        if (e.candidate?.type && !kinds.current.has(e.candidate.type)) {
+          kinds.current.add(e.candidate.type);
+          log("gathered", e.candidate.type, "candidate");
+        }
         if (e.candidate)
           channel.current?.send({
             type: "broadcast",
@@ -145,8 +174,34 @@ export function useVoice(
       pc.onconnectionstatechange = () => {
         states.current.set(peerId, pc.connectionState);
         log(peerId.slice(0, 6), pc.connectionState);
-        if (pc.connectionState === "failed")
-          setError("could not reach the other side — a strict network needs a TURN server");
+        if (pc.connectionState !== "failed") return;
+
+        // one ICE restart before giving up — the first attempt often fails while
+        // relay candidates are still being gathered
+        if (!polite && !retried.current.has(peerId)) {
+          retried.current.add(peerId);
+          log("retrying", peerId.slice(0, 6), "with an ice restart");
+          pc.restartIce();
+          void pc
+            .createOffer({ iceRestart: true })
+            .then(async (offer) => {
+              await pc.setLocalDescription(offer);
+              channel.current?.send({
+                type: "broadcast",
+                event: "signal",
+                payload: { to: peerId, from: tab(), kind: "offer", sdp: offer },
+              });
+            })
+            .catch(() => {});
+          return;
+        }
+        setError(
+          kinds.current.has("relay")
+            ? "could not reach the other side even through the relay"
+            : hasRelay
+              ? "this network blocked the call and the relay did not answer"
+              : "this network needs a relay (TURN) that is not configured yet — see the README",
+        );
       };
 
       pc.ontrack = (e) => {

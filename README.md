@@ -57,6 +57,31 @@ Everything else in the file is world data: regions, palettes, auras, lore, rank 
 npm test   # geometry + rank invariants
 ```
 
+## Voice calls need a relay
+
+Voice is peer-to-peer WebRTC, signalled over Supabase Realtime — no audio touches a server of yours.
+Between two ordinary home connections, STUN is enough. But mobile data and most campus and office
+networks use a NAT that rewrites ports per destination, and then there is no direct path to find:
+the call reports `connecting` and then `could not connect`.
+
+Fixing that needs a TURN relay. Set three env vars and rebuild:
+
+```
+NEXT_PUBLIC_TURN_URL=turn:your-relay:3478,turns:your-relay:5349?transport=tcp
+NEXT_PUBLIC_TURN_USER=...
+NEXT_PUBLIC_TURN_PASS=...
+```
+
+Cloudflare Realtime has a free allowance and Metered has a free tier; both hand you exactly those
+three values. Do not reach for the old free public relays — `openrelay.metered.ca` no longer answers
+(it returns ICE error 701), which is why nothing is hardcoded here.
+
+A relay cannot listen to anything: WebRTC media is encrypted end to end with DTLS-SRTP, so TURN only
+ever forwards ciphertext.
+
+To see what is happening, open the console and watch the `U voice:` lines — `gathered host`,
+`gathered srflx`, `gathered relay` tell you which paths exist. No `relay` line means no TURN.
+
 ## Deploying (Netlify)
 
 There is no separate backend. Every page is prerendered static HTML and all the data work happens in the
