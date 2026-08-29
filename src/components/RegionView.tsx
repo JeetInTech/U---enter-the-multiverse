@@ -6,12 +6,39 @@ import Avatar from "@/components/Avatar";
 import type { Soul } from "@/components/SoulForge";
 import {
   hasDb,
+  joinRitual,
+  leaveRitual,
   loadRegion,
   resonate as sendResonance,
   sendMessage,
   watchRegion,
+  type Ritual,
 } from "@/lib/db";
+import {
+  Ambience,
+  ForgeLine,
+  RITUAL_LABEL,
+  Rituals,
+  useRitualEvents,
+} from "@/components/Rituals";
+import VoiceBar from "@/components/VoiceBar";
+import { cue } from "@/lib/audio";
+import { useDictation } from "@/lib/speech";
+import { useVoice } from "@/lib/voice";
+import { uploadPhoto } from "@/lib/db";
 import { LORE, colorOf, rankFor, type Msg, type Region } from "@/lib/soul";
+
+const CUE_FOR: Record<Ritual["kind"], Parameters<typeof cue>[0] | null> = {
+  lantern: "lantern",
+  whisper: "whisper",
+  burst: "burst",
+  chime: "chime",
+  word: null,
+  thread: "fragment",
+};
+
+// the regions where the ritual needs something written first
+const NEEDS_TEXT = new Set(["echo", "forge", "void"]);
 
 export default function RegionView({
   region,
@@ -19,6 +46,7 @@ export default function RegionView({
   soulId,
   found,
   present,
+  onProfile,
   onLore,
   onLeave,
 }: {
@@ -27,6 +55,7 @@ export default function RegionView({
   soulId: string | null;
   found: number[];
   present: number;
+  onProfile: () => void;
   onLore: (index: number) => void;
   onLeave: () => void;
 }) {
@@ -39,6 +68,30 @@ export default function RegionView({
   const reduce = useReducedMotion();
   const mine = colorOf(soul.color);
   const nextLore = LORE.findIndex((_, i) => !found.includes(i));
+  const [events, pushEvent] = useRitualEvents();
+  const [uploading, setUploading] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const voice = useVoice(
+    region.id,
+    soulId ? { id: soulId, name: soul.name || "unnamed", color: soul.color, shape: soul.shape } : null,
+  );
+  const ritual = useRef<((r: Ritual) => void) | null>(null);
+  const dictation = useDictation(setDraft);
+
+  // the room's own channel — lanterns, whispers, bursts; nothing here is ever stored
+  useEffect(() => {
+    const send = joinRitual(region.id, (r) => {
+      pushEvent(r);
+      const c = CUE_FOR[r.kind];
+      if (c) cue(c);
+    });
+    ritual.current = send;
+    return () => {
+      leaveRitual(send);
+      ritual.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [region.id]);
 
   // the room, and then the room as it keeps happening
   useEffect(() => {
@@ -97,6 +150,48 @@ export default function RegionView({
     ]);
   };
 
+  const perform = () => {
+    const sendRitual = ritual.current;
+    if (!sendRitual) return;
+    const text = draft.trim();
+    if (NEEDS_TEXT.has(region.id) && !text) return;
+    switch (region.id) {
+      case "luminous":
+        sendRitual({ kind: "lantern", wish: text.slice(0, 44), color: soul.color, x: 8 + Math.random() * 84 });
+        break;
+      case "echo":
+        sendRitual({ kind: "whisper", text: text.slice(0, 140), color: soul.color });
+        break;
+      case "neon":
+        sendRitual({ kind: "burst", color: soul.color });
+        break;
+      case "crystal":
+        sendRitual({ kind: "chime", note: Math.floor(Math.random() * 5), color: soul.color });
+        break;
+      case "forge":
+        sendRitual({ kind: "word", word: text.split(/\s+/)[0].slice(0, 18), color: soul.color, soul: soul.name });
+        break;
+      case "void":
+        sendRitual({ kind: "thread", text: text.slice(0, 40), color: soul.color });
+        break;
+    }
+    setDraft("");
+  };
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file || !soulId) return;
+    setUploading(true);
+    try {
+      const url = await uploadPhoto(file);
+      await sendMessage(region.id, soulId, draft.trim(), url);
+      setDraft("");
+      cue("lantern");
+    } catch (e) {
+      console.warn("U: the photograph did not develop —", (e as Error).message);
+    }
+    setUploading(false);
+  };
+
   const resonate = (id: string) => {
     setMsgs((m) =>
       m.map((x) =>
@@ -124,9 +219,12 @@ export default function RegionView({
         />
       </motion.div>
 
+      {/* what the room does whether or not anyone is speaking */}
+      <Ambience region={region} present={present} />
+
       {/* ---- header ---- */}
       <motion.header
-        className="relative z-10 flex items-start justify-between px-6 pt-8 md:px-14"
+        className="relative z-10 flex items-start justify-between px-6 pt-8 pr-16 md:px-14"
         initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.25, duration: 0.7 }}
@@ -152,6 +250,21 @@ export default function RegionView({
         <Presence region={region} count={present} />
       </motion.header>
 
+      {/* ---- a world where nobody types ---- */}
+      {region.voiceOnly ? (
+        <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-10 px-6">
+          <motion.p
+            className="max-w-md text-center text-sm leading-relaxed text-mist/50 italic"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 1 }}
+          >
+            {region.blurb}
+          </motion.p>
+          <VoiceBar big region={region} {...voice} onJoin={voice.join} onLeave={voice.leave} onToggleMic={voice.toggleMic} />
+        </div>
+      ) : (
+      <>
       {/* ---- resonance feed ---- */}
       <div ref={scroller} className="relative z-10 flex-1 overflow-y-auto px-6 py-8 md:px-14">
         <div className="mx-auto max-w-3xl space-y-5">
@@ -179,6 +292,19 @@ export default function RegionView({
         </div>
       </div>
 
+      {/* ---- voice, for the rooms that have it ---- */}
+      {region.voice && (
+        <div className="relative z-10 px-6 pb-2 md:px-14">
+          <VoiceBar
+            region={region}
+            {...voice}
+            onJoin={voice.join}
+            onLeave={voice.leave}
+            onToggleMic={voice.toggleMic}
+          />
+        </div>
+      )}
+
       {/* ---- composer ---- */}
       <motion.div
         className="relative z-10 px-6 pb-8 md:px-14"
@@ -186,35 +312,118 @@ export default function RegionView({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.45, duration: 0.7 }}
       >
-        <div className="mx-auto flex max-w-3xl items-center gap-4 rounded-full border border-white/10 bg-white/[0.03] py-2.5 pr-2.5 pl-4 backdrop-blur-md">
-          <Avatar soul={soul} size={34} speaking={draft.length > 0} />
-          <span className="hidden shrink-0 leading-tight sm:block">
+        {/* the one thing only this region lets you do, where it has one */}
+        <div className={`mx-auto mb-3 flex max-w-3xl justify-center ${RITUAL_LABEL[region.id] ? "" : "hidden"}`}>
+          <motion.button
+            onClick={perform}
+            disabled={NEEDS_TEXT.has(region.id) && !draft.trim()}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="rounded-full border px-5 py-2 text-[0.56rem] uppercase tracking-[0.3em] transition-colors disabled:opacity-25"
+            style={{ borderColor: `${region.hex}55`, color: region.glow }}
+          >
+            {RITUAL_LABEL[region.id]}
+          </motion.button>
+        </div>
+
+        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-2.5 pr-2.5 pl-3 backdrop-blur-md sm:gap-4 sm:pl-4">
+          <button onClick={onProfile} aria-label="Your soul" className="shrink-0">
+            <Avatar soul={soul} size={34} speaking={draft.length > 0} />
+          </button>
+          <button onClick={onProfile} className="hidden shrink-0 text-left leading-tight sm:block">
             <span className="block font-display text-base" style={{ color: mine.glow }}>
               {soul.name || "unnamed"}
             </span>
             <span className="block text-[0.52rem] uppercase tracking-[0.22em] text-mist/40">
               {rankFor(found.length)} · {found.length} fragments
             </span>
-          </span>
+          </button>
           <input
             value={draft}
             maxLength={400}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder="say something true"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-mist/30"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-mist/30"
           />
+          {region.photos && (
+            <>
+              <input
+                ref={picker}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  void pickPhoto(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              <motion.button
+                onClick={() => picker.current?.click()}
+                disabled={uploading || !soulId}
+                whileTap={{ scale: 0.9 }}
+                aria-label="Hang a photograph"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/12 text-mist/55 transition-colors hover:border-white/35 hover:text-white disabled:opacity-30"
+              >
+                {uploading ? (
+                  <motion.span
+                    className="block h-3 w-3 rounded-full border-2 border-current border-t-transparent"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                  />
+                ) : (
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
+                    <rect x="3" y="5" width="18" height="14" rx="2.5" />
+                    <circle cx="8.5" cy="10" r="1.5" />
+                    <path d="M4 17l5-5 4 4 3-2 4 4" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </motion.button>
+            </>
+          )}
+          {dictation.supported && (
+            <motion.button
+              onClick={dictation.toggle}
+              whileTap={{ scale: 0.9 }}
+              aria-label={dictation.listening ? "Stop listening" : "Speak instead of typing"}
+              className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full border transition-colors"
+              style={{
+                borderColor: dictation.listening ? mine.hex : "#ffffff1f",
+                color: dictation.listening ? mine.glow : "#8b95ad",
+              }}
+            >
+              {dictation.listening && (
+                <motion.span
+                  className="absolute inset-0 rounded-full border"
+                  style={{ borderColor: mine.hex }}
+                  animate={{ scale: [1, 1.6], opacity: [0.7, 0] }}
+                  transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
+                />
+              )}
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" />
+              </svg>
+            </motion.button>
+          )}
           <motion.button
             onClick={send}
             whileHover={{ scale: 1.06 }}
             whileTap={{ scale: 0.94 }}
-            className="rounded-full px-5 py-2 text-[0.62rem] uppercase tracking-[0.28em] text-black"
+            className="shrink-0 rounded-full px-3.5 py-2 text-[0.55rem] uppercase tracking-[0.2em] text-black sm:px-5 sm:text-[0.62rem] sm:tracking-[0.28em]"
             style={{ background: mine.glow }}
           >
             Resonate
           </motion.button>
         </div>
       </motion.div>
+
+      </>
+      )}
+
+      {/* lanterns, whispers, bursts — the things that happen once and are gone */}
+      <Rituals events={events} />
+      {region.id === "forge" && <ForgeLine events={events} region={region} />}
 
       {/* ---- a fragment of lore, hidden in the room ---- */}
       <AnimatePresence>
@@ -314,6 +523,27 @@ function Message({
         >
           <span style={{ color: c.glow }}>{m.soul}</span>
         </div>
+        {m.image && (
+          <motion.a
+            href={m.image}
+            target="_blank"
+            rel="noreferrer"
+            className="mb-2 block overflow-hidden rounded-2xl border"
+            style={{ borderColor: `${c.hex}44` }}
+            initial={{ opacity: 0, filter: "blur(16px)", scale: 0.96 }}
+            animate={{ opacity: 1, filter: "blur(0px)", scale: 1 }}
+            transition={{ duration: 1.6, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={m.image}
+              alt="a photograph someone hung here"
+              className="max-h-72 w-full object-cover"
+              loading="lazy"
+            />
+          </motion.a>
+        )}
+        {m.text && (
         <motion.div
           className="relative rounded-2xl border px-4 py-3 text-[0.92rem] leading-relaxed backdrop-blur-sm"
           style={{
@@ -330,6 +560,7 @@ function Message({
         >
           {m.text}
         </motion.div>
+        )}
 
         <button
           onClick={onResonate}

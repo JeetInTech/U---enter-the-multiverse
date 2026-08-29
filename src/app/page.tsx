@@ -7,10 +7,15 @@ import Landing from "@/components/Landing";
 import Multiverse from "@/components/Multiverse";
 import RegionView from "@/components/RegionView";
 import SoulForge, { type Soul } from "@/components/SoulForge";
+import SoulPanel from "@/components/SoulPanel";
+import Door from "@/components/Door";
 import Starfield from "@/components/Starfield";
 import {
   arrive,
+  declareSelf,
+  dissolve,
   hasDb,
+  leaveQuietly,
   loadLore,
   loadStats,
   me as loadMe,
@@ -18,6 +23,7 @@ import {
   watchPresence,
   type Stats,
 } from "@/lib/db";
+import { cue, enterRegion as soundOf, isMuted, onMuteChange, setMuted, wake } from "@/lib/audio";
 import { TAGLINES, colorOf, rankFor, regionOf, type Region } from "@/lib/soul";
 
 type Stage = "enter" | "forge" | "arrive" | "map" | "region";
@@ -32,6 +38,9 @@ export default function U() {
   const [stats, setStats] = useState<Stats>({});
   const [presence, setPresence] = useState<Record<string, number>>({});
   const presenceRef = useRef<ReturnType<typeof watchPresence> | null>(null);
+  const [panel, setPanel] = useState(false);
+  const [gate, setGate] = useState<Region | null>(null);
+  const [muted, setMutedState] = useState(false);
   const [soul, setSoul] = useState<Soul>({
     name: "",
     tagline: TAGLINES[0],
@@ -58,7 +67,14 @@ export default function U() {
     loadMe()
       .then(async (s) => {
         if (!s) return;
-        setSoul({ name: s.name, tagline: s.tagline, shape: s.shape, color: s.color, aura: s.aura });
+        setSoul({
+          name: s.name,
+          tagline: s.tagline,
+          shape: s.shape,
+          color: s.color,
+          aura: s.aura,
+          declared: s.declared,
+        });
         setSoulId(s.id);
         setReturning(true);
         setFound(await loadLore(s.id));
@@ -86,9 +102,38 @@ export default function U() {
     presenceRef.current?.where(stage === "region" ? (region?.id ?? null) : null);
   }, [stage, region?.id]);
 
+  // the world has a voice, but only after a gesture — browsers insist
+  useEffect(() => onMuteChange(setMutedState), []);
+  useEffect(() => {
+    soundOf(stage === "region" ? (region?.id ?? null) : stage === "enter" ? null : "nexus");
+  }, [stage, region?.id]);
+
   const stepIn = () => {
+    wake();
     setWarp(1);
     setTimeout(() => setWarp(0), 1600);
+  };
+
+  const forget = () => {
+    setSoulId(null);
+    setFound([]);
+    setReturning(false);
+    setRegion(null);
+    setSoul({ name: "", tagline: TAGLINES[0], shape: "circle", color: "tide", aura: "glow" });
+  };
+
+  const leave = async () => {
+    setPanel(false);
+    setStage("enter");
+    await leaveQuietly();
+    forget();
+  };
+
+  const dissolveSoul = async () => {
+    setPanel(false);
+    setStage("enter");
+    if (soulId) await dissolve(soulId).catch((e) => console.warn("U: could not dissolve —", e.message));
+    forget();
   };
 
   const become = useCallback(async () => {
@@ -111,8 +156,24 @@ export default function U() {
   );
 
   const enterRegion = (r: Region) => {
+    // one world asks a question before it opens
+    if (r.women && soul.declared !== "woman") {
+      setGate(r);
+      return;
+    }
     setRegion(r);
     setStage("region");
+  };
+
+  const answerDoor = async (declared: "woman" | "man" | "neither") => {
+    const going = gate;
+    setGate(null);
+    setSoul((s) => ({ ...s, declared }));
+    if (soulId) await declareSelf(soulId, declared).catch(() => {});
+    if (declared === "woman" && going) {
+      setRegion(going);
+      setStage("region");
+    }
   };
 
   return (
@@ -168,6 +229,7 @@ export default function U() {
             soulId={soulId}
             found={found}
             present={presence[region.id] ?? 1}
+            onProfile={() => setPanel(true)}
             onLore={keepLore}
             onLeave={() => setStage("map")}
           />
@@ -184,15 +246,19 @@ export default function U() {
       {/* ---- the soul you are carrying ---- */}
       <AnimatePresence>
         {stage === "map" && (
-          <motion.aside
-            className="pointer-events-none absolute bottom-6 left-6 z-40 flex items-center gap-3 rounded-full border border-white/10 bg-black/40 py-2 pr-5 pl-2 backdrop-blur-md md:bottom-8 md:left-8"
+          <motion.button
+            onClick={() => setPanel(true)}
+            className="absolute bottom-6 left-6 z-40 flex items-center gap-3 rounded-full border border-white/10 bg-black/40 py-2 pr-5 pl-2 backdrop-blur-md transition-colors hover:border-white/30 md:bottom-8 md:left-8"
             initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ delay: 0.5, duration: 0.6 }}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            aria-label="Your soul"
           >
             <Avatar soul={soul} size={38} layoutId="me" />
-            <div className="leading-tight">
+            <div className="text-left leading-tight">
               <p className="font-display text-lg" style={{ color: mine.glow }}>
                 {soul.name || "unnamed"}
               </p>
@@ -200,9 +266,47 @@ export default function U() {
                 {rankFor(lore)} · {lore} fragments
               </p>
             </div>
-          </motion.aside>
+          </motion.button>
         )}
       </AnimatePresence>
+
+      {/* the world has a voice; this is how you quiet it */}
+      {stage !== "enter" && (
+        <motion.button
+          onClick={() => setMuted(!isMuted())}
+          className="absolute top-5 right-5 z-40 grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/40 text-mist/50 backdrop-blur-md transition-colors hover:border-white/30 hover:text-white md:top-auto md:right-8 md:bottom-8"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          whileTap={{ scale: 0.9 }}
+          aria-label={muted ? "Unmute the multiverse" : "Mute the multiverse"}
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
+            <path d="M4 9v6h4l5 4V5L8 9H4z" strokeLinejoin="round" />
+            {muted ? (
+              <path d="M17 9l4 6M21 9l-4 6" strokeLinecap="round" />
+            ) : (
+              <path d="M17 9a4 4 0 0 1 0 6" strokeLinecap="round" />
+            )}
+          </svg>
+        </motion.button>
+      )}
+
+      <AnimatePresence>
+        {gate && <Door region={gate} onAnswer={answerDoor} onLeave={() => setGate(null)} />}
+      </AnimatePresence>
+
+      <SoulPanel
+        soul={soul}
+        found={found}
+        open={panel}
+        onClose={() => setPanel(false)}
+        onReshape={() => {
+          setPanel(false);
+          setStage("forge");
+        }}
+        onLeave={leave}
+        onDissolve={dissolveSoul}
+      />
     </main>
   );
 }
@@ -210,6 +314,9 @@ export default function U() {
 /* ---------- first arrival in The Luminous Fields ---------- */
 
 function Arrival({ soul, onDone }: { soul: Soul; onDone: () => void }) {
+  useEffect(() => {
+    cue("arrive");
+  }, []);
   const lines = [
     "Welcome, traveler.",
     "You have arrived.",

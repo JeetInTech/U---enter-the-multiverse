@@ -11,6 +11,8 @@ export type Soul = {
   shape: string;
   color: string;
   aura: string;
+  /** self-declared, only ever asked at the door of a room that needs it */
+  declared?: string | null;
 };
 
 const STEPS = ["Shape", "Colour", "Aura", "Name"] as const;

@@ -136,6 +136,14 @@ export type Region = {
   glow: string;
   bg: string;
   hidden?: boolean;
+  /** what this world is made of, for the renderer */
+  world: "gas" | "ocean" | "storm" | "ice" | "molten" | "ringed" | "moon" | "blackhole";
+  /** rooms can do more than talk */
+  photos?: boolean;
+  voice?: boolean;
+  voiceOnly?: boolean;
+  /** a room only souls who have declared themselves women may enter */
+  women?: boolean;
 };
 
 export const REGIONS: Region[] = [
@@ -149,6 +157,8 @@ export const REGIONS: Region[] = [
     hex: "#f5b942",
     glow: "#ffd98a",
     bg: "#1a1206",
+    world: "gas",
+    voice: true,
   },
   {
     id: "echo",
@@ -160,6 +170,8 @@ export const REGIONS: Region[] = [
     hex: "#6ea8ff",
     glow: "#b7d4ff",
     bg: "#050a1c",
+    world: "ocean",
+    voice: true,
   },
   {
     id: "neon",
@@ -171,6 +183,8 @@ export const REGIONS: Region[] = [
     hex: "#d34bff",
     glow: "#ff7ae0",
     bg: "#150522",
+    world: "storm",
+    voice: true,
   },
   {
     id: "crystal",
@@ -182,6 +196,8 @@ export const REGIONS: Region[] = [
     hex: "#3fe0ac",
     glow: "#a5f7dc",
     bg: "#03170f",
+    world: "ice",
+    voice: true,
   },
   {
     id: "forge",
@@ -193,6 +209,8 @@ export const REGIONS: Region[] = [
     hex: "#ff7a2f",
     glow: "#ffb877",
     bg: "#1b0a02",
+    world: "molten",
+    voice: true,
   },
   {
     id: "void",
@@ -205,6 +223,37 @@ export const REGIONS: Region[] = [
     glow: "#ffffff",
     bg: "#000000",
     hidden: true,
+    world: "blackhole",
+    voice: true,
+  },
+  {
+    id: "darkroom",
+    name: "The Darkroom",
+    vibe: "Amber, patient, developing",
+    blurb:
+      "Bring what you saw. Photographs of things that never quite happened, hung in the dark while they come up. Talk about them, or do not.",
+    ambient: "a fan, chemicals, someone humming",
+    hex: "#e0a24a",
+    glow: "#ffd9a0",
+    bg: "#171008",
+    world: "ringed",
+    photos: true,
+    voice: true,
+  },
+  {
+    id: "sisterhood",
+    name: "The Sisterhood",
+    vibe: "Silver, spoken, women only",
+    blurb:
+      "No typing here. Voices only, and only women. A moon that keeps its own side turned away from everything else.",
+    ambient: "low voices and long pauses",
+    hex: "#e5a6d6",
+    glow: "#ffdcf3",
+    bg: "#140a12",
+    world: "moon",
+    voice: true,
+    voiceOnly: true,
+    women: true,
   },
 ];
 export const regionOf = (id: string) => REGIONS.find((r) => r.id === id) ?? REGIONS[0];
@@ -238,6 +287,7 @@ export type Msg = {
   shape: ShapeId;
   color: string;
   text: string;
+  image?: string;
   resonance: number;
   resonated?: boolean;
   mine?: boolean;

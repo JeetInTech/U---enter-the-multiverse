@@ -15,6 +15,9 @@ export const hasDb = Boolean(URL && KEY);
 let cached: SupabaseClient | null | undefined;
 const db = () => (cached ??= hasDb ? createClient(URL!, KEY!) : null);
 
+/** The raw client, for the parts that need more than these helpers: voice, storage. */
+export const client = db;
+
 export type SoulRow = {
   id: string;
   name: string;
@@ -22,6 +25,8 @@ export type SoulRow = {
   shape: string;
   color: string;
   aura: string;
+  /** what a soul said it is, if it ever said. Never verified, by design. */
+  declared?: string | null;
 };
 
 /** The soul this browser is carrying, or null if it has never arrived. */
@@ -34,7 +39,7 @@ export async function me(): Promise<SoulRow | null> {
   if (!session) return null;
   const { data } = await c
     .from("souls")
-    .select("id, name, tagline, shape, color, aura")
+    .select("id, name, tagline, shape, color, aura, declared")
     .eq("user_id", session.user.id)
     .maybeSingle();
   return data ?? null;
@@ -49,14 +54,23 @@ async function freshSession(c: SupabaseClient) {
 }
 
 /** Sign in anonymously and write the soul. Returns its id, or null when there is no db. */
+/** Record what a soul says it is. It is a door it chooses, not a checkpoint. */
+export async function declareSelf(soulId: string, declared: "woman" | "man" | "neither") {
+  const c = db();
+  if (!c) return;
+  const { error } = await c.from("souls").update({ declared }).eq("id", soulId);
+  if (error) throw error;
+}
+
 export async function arrive(soul: Omit<SoulRow, "id">): Promise<string | null> {
   const c = db();
   if (!c) return null;
 
+  const { declared: _ignored, ...look } = soul;
   const write = (userId: string) =>
     c
       .from("souls")
-      .upsert({ user_id: userId, ...soul }, { onConflict: "user_id" })
+      .upsert({ user_id: userId, ...look }, { onConflict: "user_id" })
       .select("id")
       .single();
 
@@ -77,11 +91,13 @@ export async function arrive(soul: Omit<SoulRow, "id">): Promise<string | null> 
 
 /* ---------- the feed ---------- */
 
-const SELECT = "id, text, created_at, soul:souls!soul_id(id, name, shape, color), resonances(soul_id)";
+const SELECT =
+  "id, text, image_url, created_at, soul:souls!soul_id(id, name, shape, color), resonances(soul_id)";
 
 type Row = {
   id: string;
   text: string;
+  image_url: string | null;
   soul: { id: string; name: string; shape: string; color: string };
   resonances: { soul_id: string }[];
 };
@@ -93,6 +109,7 @@ const toMsg = (r: Row, meId: string | null): Msg => ({
   shape: r.soul.shape,
   color: r.soul.color,
   text: r.text,
+  image: r.image_url ?? undefined,
   resonance: r.resonances.length,
   resonated: !!meId && r.resonances.some((x) => x.soul_id === meId),
   mine: !!meId && r.soul.id === meId,
@@ -111,11 +128,36 @@ export async function loadRegion(region: string, meId: string | null): Promise<M
   return (data as unknown as Row[]).map((r) => toMsg(r, meId));
 }
 
-export async function sendMessage(region: string, soulId: string, text: string) {
+export async function sendMessage(
+  region: string,
+  soulId: string,
+  text: string,
+  imageUrl?: string,
+) {
   const c = db();
   if (!c) return;
-  const { error } = await c.from("messages").insert({ region, soul_id: soulId, text });
+  const { error } = await c
+    .from("messages")
+    .insert({ region, soul_id: soulId, text, image_url: imageUrl ?? null });
   if (error) throw error;
+}
+
+/** Put a photograph in the bucket and hand back the address it now lives at. */
+export async function uploadPhoto(file: File): Promise<string> {
+  const c = db();
+  if (!c) throw new Error("no database");
+  const {
+    data: { session },
+  } = await c.auth.getSession();
+  if (!session) throw new Error("not signed in");
+  const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase().slice(0, 5);
+  const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await c.storage.from("photos").upload(path, file, {
+    cacheControl: "31536000",
+    contentType: file.type,
+  });
+  if (error) throw error;
+  return c.storage.from("photos").getPublicUrl(path).data.publicUrl;
 }
 
 export async function resonate(messageId: string, soulId: string) {
@@ -245,4 +287,58 @@ export function watchRegion(
   return () => {
     c.removeChannel(channel);
   };
+}
+
+/* ---------- rituals: the things a region does that are not chat ---------- */
+
+export type Ritual =
+  | { kind: "lantern"; wish: string; color: string; x: number }
+  | { kind: "whisper"; text: string; color: string }
+  | { kind: "burst"; color: string }
+  | { kind: "chime"; note: number; color: string }
+  | { kind: "word"; word: string; color: string; soul: string }
+  | { kind: "thread"; text: string; color: string };
+
+/**
+ * A broadcast channel per region. Nothing here touches the database on purpose —
+ * a lantern, a whisper, a burst of light happen once and are gone, which is the
+ * point of them. Returns a send function; sending also plays it locally.
+ */
+export function joinRitual(region: string, onRitual: (r: Ritual) => void): (r: Ritual) => void {
+  const c = db();
+  if (!c) return (r) => onRitual(r);
+
+  const channel = c.channel(`ritual:${region}`, { config: { broadcast: { self: false } } });
+  channel.on("broadcast", { event: "ritual" }, ({ payload }) => onRitual(payload as Ritual));
+  channel.subscribe();
+
+  const send = (r: Ritual) => {
+    onRitual(r); // yours happens immediately; theirs travels
+    channel.send({ type: "broadcast", event: "ritual", payload: r });
+  };
+  send.stop = () => {
+    c.removeChannel(channel);
+  };
+  return send;
+}
+
+/** Close the channel a joinRitual send function belongs to. */
+export const leaveRitual = (send: (r: Ritual) => void) =>
+  (send as { stop?: () => void }).stop?.();
+
+/* ---------- leaving ---------- */
+
+/** Forget this browser's soul without deleting anything it said. */
+export async function leaveQuietly() {
+  const c = db();
+  if (c) await c.auth.signOut({ scope: "local" }).catch(() => {});
+}
+
+/** Erase the soul entirely — messages, resonances and discoveries go with it. */
+export async function dissolve(soulId: string) {
+  const c = db();
+  if (!c) return;
+  const { error } = await c.from("souls").delete().eq("id", soulId);
+  if (error) throw error;
+  await c.auth.signOut({ scope: "local" }).catch(() => {});
 }
