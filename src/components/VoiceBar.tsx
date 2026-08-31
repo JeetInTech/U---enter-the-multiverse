@@ -34,6 +34,7 @@ export default function VoiceBar({
       <AnimatePresence>
         {joined && (
           <motion.div
+            key="speakers-list"
             className={`flex flex-wrap justify-center ${big ? "gap-8" : "gap-4"}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}

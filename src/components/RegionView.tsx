@@ -27,6 +27,9 @@ import { useDictation } from "@/lib/speech";
 import { useVoice } from "@/lib/voice";
 import { uploadPhoto } from "@/lib/db";
 import { LORE, colorOf, rankFor, type Msg, type Region } from "@/lib/soul";
+import MessageMenu from "@/components/MessageMenu";
+import { reportMessage, type ReportReason } from "@/lib/safety";
+import type { LiveMoment } from "@/lib/moments";
 
 const CUE_FOR: Record<Ritual["kind"], Parameters<typeof cue>[0] | null> = {
   lantern: "lantern",
@@ -46,8 +49,16 @@ export default function RegionView({
   soulId,
   found,
   present,
+  blockedIds,
+  keptIds,
+  unreadEchoes = 0,
+  activeMoment,
   onProfile,
   onLore,
+  onBlock,
+  onKeep,
+  onRelease,
+  onEnterVoid,
   onLeave,
 }: {
   region: Region;
@@ -55,8 +66,16 @@ export default function RegionView({
   soulId: string | null;
   found: number[];
   present: number;
+  blockedIds: Set<string>;
+  keptIds: Set<string>;
+  unreadEchoes?: number;
+  activeMoment?: LiveMoment | null;
   onProfile: () => void;
   onLore: (index: number) => void;
+  onBlock: (soulId: string) => void;
+  onKeep: (soulId: string, details: { name: string; shape: string; color: string }) => void;
+  onRelease: (soulId: string) => void;
+  onEnterVoid?: (partner: { id: string; name: string; shape: string; color: string }) => void;
   onLeave: () => void;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -70,6 +89,11 @@ export default function RegionView({
   const nextLore = LORE.findIndex((_, i) => !found.includes(i));
   const [events, pushEvent] = useRitualEvents();
   const [uploading, setUploading] = useState(false);
+  const [coolingDown, setCoolingDown] = useState(false);
+  const [spamWarning, setSpamWarning] = useState<string | null>(null);
+  const lastSendRef = useRef<number>(0);
+  const lastRitualRef = useRef<number>(0);
+  const resonatingRef = useRef<Set<string>>(new Set());
   const picker = useRef<HTMLInputElement>(null);
   const voice = useVoice(
     region.id,
@@ -106,7 +130,11 @@ export default function RegionView({
 
     return watchRegion(region.id, soulId ? { id: soulId, name: soul.name } : null, {
       onMessage: (m) =>
-        setMsgs((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m])),
+        setMsgs((prev) => {
+          // silently drop messages from blocked souls as they arrive live
+          if (m.soulId && blockedIds.has(m.soulId)) return prev;
+          return prev.some((x) => x.id === m.id) ? prev : [...prev, m];
+        }),
       // my own resonance already counted itself, optimistically
       onResonance: (id, from) =>
         from !== soulId &&
@@ -130,10 +158,23 @@ export default function RegionView({
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
+    const now = Date.now();
+    if (now - lastSendRef.current < 1500) {
+      setSpamWarning("Breathe... silence between words.");
+      setTimeout(() => setSpamWarning(null), 2000);
+      return;
+    }
+    lastSendRef.current = now;
+    setCoolingDown(true);
+    setTimeout(() => setCoolingDown(false), 1500);
     setDraft("");
     if (hasDb && soulId) {
-      // realtime echoes it straight back, so there is nothing to append here
-      await sendMessage(region.id, soulId, text).catch(() => {});
+      try {
+        await sendMessage(region.id, soulId, text);
+      } catch (e) {
+        setSpamWarning((e as Error)?.message || "The multiverse asks for silence between thoughts.");
+        setTimeout(() => setSpamWarning(null), 3500);
+      }
       return;
     }
     setMsgs((m) => [
@@ -155,6 +196,13 @@ export default function RegionView({
     if (!sendRitual) return;
     const text = draft.trim();
     if (NEEDS_TEXT.has(region.id) && !text) return;
+    const now = Date.now();
+    if (now - lastRitualRef.current < 2500) {
+      setSpamWarning("The energy needs a moment to gather...");
+      setTimeout(() => setSpamWarning(null), 2500);
+      return;
+    }
+    lastRitualRef.current = now;
     switch (region.id) {
       case "luminous":
         sendRitual({ kind: "lantern", wish: text.slice(0, 44), color: soul.color, x: 8 + Math.random() * 84 });
@@ -193,6 +241,8 @@ export default function RegionView({
   };
 
   const resonate = (id: string) => {
+    if (resonatingRef.current.has(id)) return;
+    resonatingRef.current.add(id);
     setMsgs((m) =>
       m.map((x) =>
         x.id === id && !x.resonated ? { ...x, resonated: true, resonance: x.resonance + 1 } : x,
@@ -246,6 +296,33 @@ export default function RegionView({
           <p className="mt-2 text-[0.66rem] uppercase tracking-[0.3em] text-mist/40">
             {region.vibe} · {region.ambient}
           </p>
+          {region.id.startsWith("void") && (
+            <div className="mt-2.5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.04] px-3 py-1 backdrop-blur-md">
+              <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              <span className="text-[0.52rem] uppercase tracking-[0.24em] text-white/90">
+                Private 1-on-1 Sanctuary
+              </span>
+            </div>
+          )}
+          {activeMoment && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 backdrop-blur-md"
+              style={{
+                borderColor: `${activeMoment.auraGlow}44`,
+                background: `${activeMoment.auraHex}22`,
+              }}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: activeMoment.auraGlow, boxShadow: `0 0 6px ${activeMoment.auraGlow}` }}
+              />
+              <span className="text-[0.52rem] uppercase tracking-[0.24em]" style={{ color: activeMoment.auraGlow }}>
+                {activeMoment.name} is active
+              </span>
+            </motion.div>
+          )}
         </div>
         <Presence region={region} count={present} />
       </motion.header>
@@ -279,15 +356,36 @@ export default function RegionView({
             </motion.p>
           )}
           <AnimatePresence initial={false}>
-            {msgs.map((m, i) => (
-              <Message
-                key={m.id}
-                m={m}
-                i={i}
-                accent={region.glow}
-                onResonate={() => resonate(m.id)}
-              />
-            ))}
+            {msgs
+              .filter((m) => !m.soulId || !blockedIds.has(m.soulId))
+              .map((m, i) => (
+                <Message
+                  key={m.id}
+                  m={m}
+                  i={i}
+                  accent={region.glow}
+                  onResonate={() => resonate(m.id)}
+                  onBlock={m.soulId && !m.mine ? () => onBlock(m.soulId!) : undefined}
+                  onReport={
+                    m.soulId && !m.mine && soulId
+                      ? (reason: ReportReason) =>
+                          reportMessage(m.id, soulId, reason).catch(() => {})
+                      : undefined
+                  }
+                  isKept={m.soulId ? keptIds.has(m.soulId) : false}
+                  onKeep={
+                    m.soulId && !m.mine
+                      ? () => onKeep(m.soulId!, { name: m.soul, shape: m.shape, color: m.color })
+                      : undefined
+                  }
+                  onRelease={m.soulId && !m.mine ? () => onRelease(m.soulId!) : undefined}
+                  onEnterVoid={
+                    m.soulId && !m.mine && onEnterVoid
+                      ? () => onEnterVoid({ id: m.soulId!, name: m.soul, shape: m.shape, color: m.color })
+                      : undefined
+                  }
+                />
+              ))}
           </AnimatePresence>
         </div>
       </div>
@@ -331,14 +429,41 @@ export default function RegionView({
             {dictation.error}
           </p>
         )}
+        <AnimatePresence>
+          {spamWarning && (
+            <motion.p
+              key="spam-warning"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mx-auto mb-2.5 max-w-md text-center text-[0.58rem] tracking-[0.28em] text-amber-200/80 uppercase backdrop-blur-sm"
+            >
+              ✦ {spamWarning}
+            </motion.p>
+          )}
+        </AnimatePresence>
         <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] py-2.5 pr-2.5 pl-3 backdrop-blur-md sm:gap-4 sm:pl-4">
-          <button onClick={onProfile} aria-label="Your soul" className="shrink-0">
+          <button onClick={onProfile} aria-label="Your soul" className="relative shrink-0">
             <Avatar soul={soul} size={34} speaking={draft.length > 0} />
+            {unreadEchoes > 0 && (
+              <motion.span
+                className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-black"
+                animate={{ scale: [1, 1.25, 1], opacity: [0.8, 1, 0.8] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              />
+            )}
           </button>
           <button onClick={onProfile} className="hidden shrink-0 text-left leading-tight sm:block">
-            <span className="block font-display text-base" style={{ color: mine.glow }}>
-              {soul.name || "unnamed"}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="block font-display text-base" style={{ color: mine.glow }}>
+                {soul.name || "unnamed"}
+              </span>
+              {unreadEchoes > 0 && (
+                <span className="rounded-full bg-amber-400/20 px-1.5 py-0.2 text-[0.48rem] tracking-wider text-amber-300">
+                  +{unreadEchoes}
+                </span>
+              )}
+            </div>
             <span className="block text-[0.52rem] uppercase tracking-[0.22em] text-mist/40">
               {rankFor(found.length)} · {found.length} fragments
             </span>
@@ -347,7 +472,7 @@ export default function RegionView({
             value={draft}
             maxLength={400}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
+            onKeyDown={(e) => e.key === "Enter" && !coolingDown && send()}
             placeholder="say something true"
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-mist/30"
           />
@@ -413,12 +538,13 @@ export default function RegionView({
           )}
           <motion.button
             onClick={send}
-            whileHover={{ scale: 1.06 }}
-            whileTap={{ scale: 0.94 }}
-            className="shrink-0 rounded-full px-3.5 py-2 text-[0.55rem] uppercase tracking-[0.2em] text-black sm:px-5 sm:text-[0.62rem] sm:tracking-[0.28em]"
+            disabled={coolingDown || !draft.trim()}
+            whileHover={coolingDown ? {} : { scale: 1.06 }}
+            whileTap={coolingDown ? {} : { scale: 0.94 }}
+            className="shrink-0 rounded-full px-3.5 py-2 text-[0.55rem] uppercase tracking-[0.2em] text-black transition-opacity disabled:opacity-40 sm:px-5 sm:text-[0.62rem] sm:tracking-[0.28em]"
             style={{ background: mine.glow }}
           >
-            Resonate
+            {coolingDown ? "breathe…" : "Resonate"}
           </motion.button>
         </div>
       </motion.div>
@@ -463,6 +589,7 @@ export default function RegionView({
       <AnimatePresence>
         {fragment && (
           <motion.div
+            key="lore-fragment-modal"
             className="absolute inset-0 z-30 grid place-items-center bg-black/70 px-6 backdrop-blur-md"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -500,11 +627,23 @@ function Message({
   i,
   accent,
   onResonate,
+  onBlock,
+  onReport,
+  isKept,
+  onKeep,
+  onRelease,
+  onEnterVoid,
 }: {
   m: Msg;
   i: number;
   accent: string;
   onResonate: () => void;
+  onBlock?: () => void;
+  onReport?: (reason: ReportReason) => void;
+  isKept?: boolean;
+  onKeep?: () => void;
+  onRelease?: () => void;
+  onEnterVoid?: () => void;
 }) {
   const c = colorOf(m.color);
   const heat = Math.min(m.resonance / 90, 1); // loud messages literally glow brighter
@@ -527,6 +666,17 @@ function Message({
           }`}
         >
           <span style={{ color: c.glow }}>{m.soul}</span>
+          {onBlock && onReport && (
+            <MessageMenu
+              soulName={m.soul}
+              onBlock={onBlock}
+              onReport={onReport}
+              isKept={isKept}
+              onKeep={onKeep}
+              onRelease={onRelease}
+              onEnterVoid={onEnterVoid}
+            />
+          )}
         </div>
         {m.image && (
           <motion.a

@@ -3,11 +3,12 @@
 // Not a list of rooms — a sky with worlds in it. Each one drifts, breathes, and
 // carries the souls currently standing inside it around its own orbit.
 
-import { motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import Planet from "@/components/Planet";
 import type { Stats } from "@/lib/db";
-import { REGIONS, VOID_AT, type Region } from "@/lib/soul";
+import { REGIONS, VOID_AT, getBusiestRegion, regionOf, type Region } from "@/lib/soul";
+import { useLiveMoment } from "@/lib/moments";
 
 // where each world hangs in the sky, as a percentage of the field
 const PLACE: Record<string, { x: number; y: number; size: number }> = {
@@ -36,16 +37,21 @@ export default function Multiverse({
   stats,
   presence,
   onOpen,
+  onOpenVoid,
 }: {
   lore: number;
   stats: Stats;
   presence: Record<string, number>;
   onOpen: (r: Region) => void;
+  onOpenVoid?: () => void;
 }) {
-  const voidOpen = lore >= VOID_AT;
+  const voidOpen = true; // The Void is always accessible as a private sanctuary
   // you can always see the hole at the centre; going into it is another matter
   const visible = REGIONS;
   const [focus, setFocus] = useState<string | null>(null);
+  const [momentModal, setMomentModal] = useState(false);
+  const moment = useLiveMoment();
+  const busiest = getBusiestRegion(presence, stats, lore);
   const reduce = useReducedMotion();
 
   // the whole sky leans with the pointer
@@ -78,7 +84,7 @@ export default function Multiverse({
       transition={{ duration: 0.8 }}
     >
       <motion.header
-        className="pointer-events-none absolute inset-x-0 top-8 z-30 text-center md:top-10"
+        className="pointer-events-none absolute inset-x-0 top-8 z-30 flex flex-col items-center px-4 text-center md:top-10"
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 1.2, delay: 0.2 }}
@@ -89,6 +95,34 @@ export default function Multiverse({
             ? "eight worlds, and the one at the centre finally opened"
             : "seven worlds, and something at the centre you have not earned"}
         </p>
+
+        {/* Live Moment Countdown Pill */}
+        <motion.button
+          onClick={() => setMomentModal(true)}
+          whileHover={{ scale: 1.04 }}
+          whileTap={{ scale: 0.96 }}
+          className="pointer-events-auto mt-3.5 inline-flex items-center gap-2.5 rounded-full border px-4 py-1.5 backdrop-blur-md transition-colors"
+          style={{
+            borderColor: moment.active ? `${moment.active.auraGlow}55` : "rgba(255,255,255,0.12)",
+            background: moment.active ? `${moment.active.auraHex}25` : "rgba(0,0,0,0.45)",
+          }}
+        >
+          <motion.span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{
+              background: moment.active ? moment.active.auraGlow : "#8ea2c8",
+              boxShadow: moment.active ? `0 0 10px ${moment.active.auraGlow}` : "none",
+            }}
+            animate={moment.active ? { scale: [1, 1.4, 1], opacity: [0.6, 1, 0.6] } : {}}
+            transition={{ duration: 2, repeat: Infinity }}
+          />
+          <span
+            className="text-[0.56rem] uppercase tracking-[0.26em]"
+            style={{ color: moment.active ? moment.active.auraGlow : "#a8b0c8" }}
+          >
+            {moment.displayText}
+          </span>
+        </motion.button>
       </motion.header>
 
       {/* ---- the field ---- */}
@@ -136,12 +170,13 @@ export default function Multiverse({
             i={i}
             here={presence[r.id] ?? 0}
             stat={stats[r.id]}
+            isBusiest={r.id === busiest.id && ((presence[r.id] ?? 0) > 0 || (stats[r.id]?.voices ?? 0) > 0)}
             locked={!!r.hidden && !voidOpen}
             dimmed={!!focus && focus !== r.id}
             reduce={!!reduce}
             onHover={() => setFocus(r.id)}
             onLeave={() => setFocus((f) => (f === r.id ? null : f))}
-            onOpen={() => onOpen(r)}
+            onOpen={() => (r.id === "void" && onOpenVoid ? onOpenVoid() : onOpen(r))}
           />
         ))}
       </motion.div>
@@ -180,6 +215,84 @@ export default function Multiverse({
           )}
         </motion.div>
       </div>
+
+      {/* Moment Details Modal */}
+      <AnimatePresence>
+        {momentModal && (
+          <motion.div
+            key="moment-details-modal"
+            className="absolute inset-0 z-50 grid place-items-center bg-black/75 px-6 backdrop-blur-xl"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setMomentModal(false)}
+          >
+            <motion.div
+              className="w-full max-w-sm rounded-3xl border border-white/10 bg-white/[0.03] p-7 text-center"
+              initial={{ scale: 0.92, y: 24, filter: "blur(12px)" }}
+              animate={{ scale: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ scale: 0.96, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 160, damping: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {(() => {
+                const target = moment.active || moment.next;
+                const rec = regionOf(target.recommendedRegion);
+                return (
+                  <>
+                    <div
+                      className="mx-auto mb-3.5 grid h-12 w-12 place-items-center rounded-full border border-white/10"
+                      style={{ background: `${target.auraHex}33` }}
+                    >
+                      <span className="text-xl">✦</span>
+                    </div>
+                    <span
+                      className="text-[0.54rem] uppercase tracking-[0.3em]"
+                      style={{ color: target.auraGlow }}
+                    >
+                      {moment.active ? "Happening Now" : "Scheduled Moment"}
+                    </span>
+                    <h3 className="mt-1 font-display text-3xl" style={{ color: target.auraGlow }}>
+                      {target.name}
+                    </h3>
+                    <p className="mt-1 text-sm italic text-mist/60">{target.tagline}</p>
+                    <p className="mt-4 text-xs leading-relaxed text-mist/75">
+                      {target.description}
+                    </p>
+
+                    <div className="mt-6 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 text-left">
+                      <p className="text-[0.52rem] uppercase tracking-[0.24em] text-mist/40">
+                        Gathering World
+                      </p>
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="text-sm font-medium" style={{ color: rec.glow }}>
+                          {rec.name}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setMomentModal(false);
+                            onOpen(rec);
+                          }}
+                          className="rounded-full border border-white/15 px-3 py-1 text-[0.52rem] uppercase tracking-[0.22em] text-white hover:bg-white/10 transition-colors"
+                        >
+                          Enter
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setMomentModal(false)}
+                      className="mt-6 w-full rounded-full border border-white/10 py-2.5 text-[0.58rem] uppercase tracking-[0.3em] text-mist/50 hover:border-white/25 hover:text-white transition-colors"
+                    >
+                      Close
+                    </button>
+                  </>
+                );
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -189,6 +302,7 @@ function World({
   i,
   here,
   stat,
+  isBusiest,
   dimmed,
   locked,
   reduce,
@@ -200,6 +314,7 @@ function World({
   i: number;
   here: number;
   stat?: { souls: number; voices: number };
+  isBusiest: boolean;
   dimmed: boolean;
   locked: boolean;
   reduce: boolean;
@@ -283,6 +398,20 @@ function World({
         />
       ))}
 
+      {/* active gathering beacon ring */}
+      {isBusiest && !locked && (
+        <motion.span
+          className="pointer-events-none absolute -inset-3 rounded-full border border-dashed"
+          style={{ borderColor: r.glow }}
+          animate={{ rotate: 360, scale: [1, 1.06, 1], opacity: [0.35, 0.7, 0.35] }}
+          transition={{
+            rotate: { duration: 25, repeat: Infinity, ease: "linear" },
+            scale: { duration: 3, repeat: Infinity, ease: "easeInOut" },
+            opacity: { duration: 3, repeat: Infinity, ease: "easeInOut" },
+          }}
+        />
+      )}
+
       <motion.span
         layoutId={`name-${r.id}`}
         className="absolute top-full left-1/2 mt-5 block -translate-x-1/2 font-display text-sm whitespace-nowrap md:mt-6 md:text-lg"
@@ -296,16 +425,29 @@ function World({
         </span>
       )}
 
-      {here > 0 && (
+      {here > 0 ? (
         <motion.span
           className="absolute top-full left-1/2 mt-10 block -translate-x-1/2 text-[0.5rem] uppercase tracking-[0.28em] whitespace-nowrap md:mt-11"
           style={{ color: r.glow }}
           initial={{ opacity: 0 }}
-          animate={{ opacity: [0.4, 1, 0.4] }}
+          animate={{ opacity: [0.5, 1, 0.5] }}
           transition={{ duration: 2.4, repeat: Infinity }}
         >
-          {here} here now
+          {here} here now{isBusiest ? " · gathering hub" : ""}
         </motion.span>
+      ) : isBusiest ? (
+        <span
+          className="absolute top-full left-1/2 mt-10 block -translate-x-1/2 text-[0.48rem] uppercase tracking-[0.24em] whitespace-nowrap md:mt-11"
+          style={{ color: r.glow }}
+        >
+          ✦ most active
+        </span>
+      ) : (
+        !locked && (
+          <span className="absolute top-full left-1/2 mt-10 block -translate-x-1/2 text-[0.46rem] uppercase tracking-[0.24em] whitespace-nowrap text-mist/22 md:mt-11">
+            in stillness
+          </span>
+        )
       )}
     </motion.button>
   );

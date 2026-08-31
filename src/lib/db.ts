@@ -13,7 +13,7 @@ const KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 export const hasDb = Boolean(URL && KEY);
 
 let cached: SupabaseClient | null | undefined;
-const db = () => (cached ??= hasDb ? createClient(URL!, KEY!) : null);
+export const db = () => (cached ??= hasDb ? createClient(URL!, KEY!) : null);
 
 /** The raw client, for the parts that need more than these helpers: voice, storage. */
 export const client = db;
@@ -211,6 +211,7 @@ export async function recordLore(soulId: string, index: number) {
 export function watchPresence(
   me: { id: string; name: string } | null,
   onCounts: (counts: Record<string, number>) => void,
+  onLocations?: (locations: Record<string, string>) => void,
 ): { where: (region: string | null) => void; stop: () => void } {
   const c = db();
   if (!c) return { where: () => {}, stop: () => {} };
@@ -223,20 +224,28 @@ export function watchPresence(
   channel
     .on("presence", { event: "sync" }, () => {
       const counts: Record<string, number> = {};
+      const locations: Record<string, string> = {};
       for (const souls of Object.values(
-        channel.presenceState<{ region: string | null }>(),
+        channel.presenceState<{ region: string | null; soulId?: string | null }>()
       ))
-        for (const s of souls) if (s.region) counts[s.region] = (counts[s.region] ?? 0) + 1;
+        for (const s of souls) {
+          if (s.region) {
+            counts[s.region] = (counts[s.region] ?? 0) + 1;
+            if (s.soulId) locations[s.soulId] = s.region;
+          }
+        }
       onCounts(counts);
+      onLocations?.(locations);
     })
     .subscribe((status) => {
-      if (status === "SUBSCRIBED") channel.track({ soul: me?.name ?? null, region });
+      if (status === "SUBSCRIBED")
+        channel.track({ soul: me?.name ?? null, soulId: me?.id ?? null, region });
     });
 
   return {
     where: (r) => {
       region = r;
-      channel.track({ soul: me?.name ?? null, region: r });
+      channel.track({ soul: me?.name ?? null, soulId: me?.id ?? null, region: r });
     },
     stop: () => {
       c.removeChannel(channel);

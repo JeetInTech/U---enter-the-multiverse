@@ -1,13 +1,15 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Avatar from "@/components/Avatar";
 import Landing from "@/components/Landing";
 import Multiverse from "@/components/Multiverse";
 import RegionView from "@/components/RegionView";
 import SoulForge, { type Soul } from "@/components/SoulForge";
 import SoulPanel from "@/components/SoulPanel";
+import ConstellationPanel from "@/components/ConstellationPanel";
+import VoidSelector from "@/components/VoidSelector";
 import Door from "@/components/Door";
 import Starfield from "@/components/Starfield";
 import {
@@ -24,7 +26,12 @@ import {
   type Stats,
 } from "@/lib/db";
 import { cue, enterRegion as soundOf, isMuted, onMuteChange, setMuted, wake } from "@/lib/audio";
-import { TAGLINES, colorOf, rankFor, regionOf, type Region } from "@/lib/soul";
+import { TAGLINES, colorOf, createVoidRegion, getBusiestRegion, getVoidRegionId, rankFor, regionOf, type Region } from "@/lib/soul";
+import { blockSoul, loadBlocks } from "@/lib/safety";
+import { keepSoul, loadConstellation, releaseSoul, type KeptSoul } from "@/lib/constellation";
+import { fetchEchoes, getUnreadEchoCount, markEchoesSeen, type ResonanceNotice } from "@/lib/inbox";
+import { useLiveMoment } from "@/lib/moments";
+import { cacheVoidThread, fetchVoidThreads, type VoidThread } from "@/lib/void";
 
 type Stage = "enter" | "forge" | "arrive" | "map" | "region";
 
@@ -41,6 +48,16 @@ export default function U() {
   const [panel, setPanel] = useState(false);
   const [gate, setGate] = useState<Region | null>(null);
   const [muted, setMutedState] = useState(false);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  const [keptSouls, setKeptSouls] = useState<KeptSoul[]>([]);
+  const [soulLocations, setSoulLocations] = useState<Record<string, string>>({});
+  const [constellationOpen, setConstellationOpen] = useState(false);
+  const [voidSelectorOpen, setVoidSelectorOpen] = useState(false);
+  const [voidThreads, setVoidThreads] = useState<VoidThread[]>([]);
+  const [partnerSoul, setPartnerSoul] = useState<{ id: string; name: string; shape: string; color: string } | null>(null);
+  const [echoes, setEchoes] = useState<ResonanceNotice[]>([]);
+  const [unreadEchoes, setUnreadEchoes] = useState(0);
+  const keptIds = useMemo(() => new Set(keptSouls.map((s) => s.id)), [keptSouls]);
   const [soul, setSoul] = useState<Soul>({
     name: "",
     tagline: TAGLINES[0],
@@ -51,8 +68,13 @@ export default function U() {
 
   const lore = found.length;
   const mine = colorOf(soul.color);
+  const moment = useLiveMoment();
   const here = stage === "region" && region ? region : null;
-  const tint = here ?? { hex: mine.hex, glow: mine.glow, bg: "#04040a" };
+  const tint = here
+    ? here
+    : moment.active && stage === "map"
+    ? { hex: moment.active.auraHex, glow: moment.active.auraGlow, bg: "#04040a" }
+    : { hex: mine.hex, glow: mine.glow, bg: "#04040a" };
 
   // the whole world takes on the colour of wherever you are
   useEffect(() => {
@@ -88,9 +110,32 @@ export default function U() {
     loadStats().then(setStats).catch(() => {});
   }, [stage]);
 
+  const refreshEchoes = useCallback(async () => {
+    if (!soulId) return;
+    const items = await fetchEchoes(soulId).catch(() => []);
+    setEchoes(items);
+    setUnreadEchoes(getUnreadEchoCount(items));
+  }, [soulId]);
+
+  // load blocks + constellation + inbox once the soul is known
+  useEffect(() => {
+    if (!soulId) return;
+    loadBlocks(soulId).then(setBlockedIds).catch(() => {});
+    loadConstellation(soulId).then(setKeptSouls).catch(() => {});
+    refreshEchoes();
+  }, [soulId, refreshEchoes]);
+
+  useEffect(() => {
+    if (stage === "map") refreshEchoes();
+  }, [stage, refreshEchoes]);
+
   // one presence channel for the whole multiverse; it follows you from room to room
   useEffect(() => {
-    const watch = watchPresence(soulId ? { id: soulId, name: soul.name } : null, setPresence);
+    const watch = watchPresence(
+      soulId ? { id: soulId, name: soul.name } : null,
+      setPresence,
+      setSoulLocations,
+    );
     presenceRef.current = watch;
     return () => {
       presenceRef.current = null;
@@ -119,6 +164,9 @@ export default function U() {
     setFound([]);
     setReturning(false);
     setRegion(null);
+    setKeptSouls([]);
+    setBlockedIds(new Set());
+    setSoulLocations({});
     setSoul({ name: "", tagline: TAGLINES[0], shape: "circle", color: "tide", aura: "glow" });
   };
 
@@ -147,6 +195,33 @@ export default function U() {
     if (id) setSoulId(id);
   }, [soul]);
 
+  // add a soul to the local block set and persist it to the DB
+  const handleBlock = useCallback(
+    (blockedSoulId: string) => {
+      setBlockedIds((prev) => new Set([...prev, blockedSoulId]));
+      if (soulId) blockSoul(soulId, blockedSoulId).catch(() => {});
+    },
+    [soulId],
+  );
+
+  const handleKeep = useCallback(
+    (targetId: string, details: { name: string; shape: string; color: string }) => {
+      setKeptSouls((prev) =>
+        prev.some((s) => s.id === targetId) ? prev : [...prev, { id: targetId, ...details }],
+      );
+      if (soulId) keepSoul(soulId, targetId).catch(() => {});
+    },
+    [soulId],
+  );
+
+  const handleRelease = useCallback(
+    (targetId: string) => {
+      setKeptSouls((prev) => prev.filter((s) => s.id !== targetId));
+      if (soulId) releaseSoul(soulId, targetId).catch(() => {});
+    },
+    [soulId],
+  );
+
   const keepLore = useCallback(
     (index: number) => {
       setFound((f) => (f.includes(index) ? f : [...f, index]));
@@ -156,14 +231,47 @@ export default function U() {
   );
 
   const enterRegion = (r: Region) => {
-    // one world asks a question before it opens
+    if (r.hidden && lore < 6 && !r.id.startsWith("void")) return;
+    if (r.id === "void") {
+      setVoidSelectorOpen(true);
+      return;
+    }
     if (r.women && soul.declared !== "woman") {
       setGate(r);
       return;
     }
+    soundOf(r.id);
+    cue("whisper");
     setRegion(r);
+    setWarp(1);
     setStage("region");
+    setTimeout(() => setWarp(0), 700);
   };
+
+  const enterVoidWith = (partner: { id: string; name: string; shape: string; color: string }) => {
+    setPartnerSoul(partner);
+    setVoidSelectorOpen(false);
+    setConstellationOpen(false);
+    const myId = soulId || "me";
+    const voidId = getVoidRegionId(myId, partner.id);
+    const voidRegion = createVoidRegion(partner, voidId);
+    cacheVoidThread({
+      partnerId: partner.id,
+      partnerName: partner.name,
+      partnerShape: partner.shape,
+      partnerColor: partner.color,
+      lastMessage: "Opened the Void",
+      lastAt: new Date().toISOString(),
+      regionId: voidId,
+    });
+    enterRegion(voidRegion);
+  };
+
+  useEffect(() => {
+    if (soulId) {
+      fetchVoidThreads(soulId).then(setVoidThreads);
+    }
+  }, [soulId, voidSelectorOpen]);
 
   const answerDoor = async (declared: "woman" | "man" | "neither") => {
     const going = gate;
@@ -208,7 +316,14 @@ export default function U() {
         )}
 
         {stage === "arrive" && (
-          <Arrival key="arrive" soul={soul} onDone={() => setStage("map")} />
+          <Arrival
+            key="arrive"
+            soul={soul}
+            presence={presence}
+            stats={stats}
+            lore={lore}
+            onDone={(target) => enterRegion(target)}
+          />
         )}
 
         {stage === "map" && (
@@ -218,20 +333,32 @@ export default function U() {
             stats={stats}
             presence={presence}
             onOpen={enterRegion}
+            onOpenVoid={() => setVoidSelectorOpen(true)}
           />
         )}
 
         {stage === "region" && region && (
           <RegionView
             key={`region-${region.id}`}
-            region={regionOf(region.id)}
+            region={regionOf(region.id, partnerSoul)}
             soul={soul}
             soulId={soulId}
             found={found}
             present={presence[region.id] ?? 1}
+            blockedIds={blockedIds}
+            keptIds={keptIds}
+            unreadEchoes={unreadEchoes}
+            activeMoment={moment.active}
             onProfile={() => setPanel(true)}
             onLore={keepLore}
-            onLeave={() => setStage("map")}
+            onBlock={handleBlock}
+            onKeep={handleKeep}
+            onRelease={handleRelease}
+            onEnterVoid={enterVoidWith}
+            onLeave={() => {
+              setPartnerSoul(null);
+              setStage("map");
+            }}
           />
         )}
       </AnimatePresence>
@@ -247,6 +374,7 @@ export default function U() {
       <AnimatePresence>
         {stage === "map" && (
           <motion.button
+            key="soul-profile-button"
             onClick={() => setPanel(true)}
             className="absolute bottom-6 left-6 z-40 flex items-center gap-3 rounded-full border border-white/10 bg-black/40 py-2 pr-5 pl-2 backdrop-blur-md transition-colors hover:border-white/30 md:bottom-8 md:left-8"
             initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
@@ -257,15 +385,57 @@ export default function U() {
             whileTap={{ scale: 0.97 }}
             aria-label="Your soul"
           >
-            <Avatar soul={soul} size={38} layoutId="me" />
+            <div className="relative">
+              <Avatar soul={soul} size={38} layoutId="me" />
+              {unreadEchoes > 0 && (
+                <motion.span
+                  className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-amber-400 border-2 border-black"
+                  animate={{ scale: [1, 1.25, 1], opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                />
+              )}
+            </div>
             <div className="text-left leading-tight">
-              <p className="font-display text-lg" style={{ color: mine.glow }}>
-                {soul.name || "unnamed"}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="font-display text-lg" style={{ color: mine.glow }}>
+                  {soul.name || "unnamed"}
+                </p>
+                {unreadEchoes > 0 && (
+                  <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[0.5rem] tracking-wider text-amber-300">
+                    +{unreadEchoes}
+                  </span>
+                )}
+              </div>
               <p className="text-[0.56rem] uppercase tracking-[0.28em] text-mist/45">
                 {rankFor(lore)} · {lore} fragments
               </p>
             </div>
+          </motion.button>
+        )}
+        {stage === "map" && (
+          <motion.button
+            key="constellation-button"
+            onClick={() => setConstellationOpen(true)}
+            className="absolute right-6 bottom-6 z-40 flex items-center gap-2.5 rounded-full border border-white/10 bg-black/40 py-2 pr-4 pl-3 backdrop-blur-md transition-colors hover:border-white/30 md:right-8 md:bottom-8"
+            initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ delay: 0.65, duration: 0.6 }}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            aria-label="Your constellation"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4 text-mist/60" fill="currentColor">
+              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+            </svg>
+            <span className="text-[0.56rem] uppercase tracking-[0.28em] text-mist/55">
+              Constellation
+            </span>
+            {keptSouls.length > 0 && (
+              <span className="grid h-4 w-4 place-items-center rounded-full bg-white/15 text-[0.5rem] text-mist/80">
+                {keptSouls.length}
+              </span>
+            )}
           </motion.button>
         )}
       </AnimatePresence>
@@ -293,14 +463,40 @@ export default function U() {
       )}
 
       <AnimatePresence>
-        {gate && <Door region={gate} onAnswer={answerDoor} onLeave={() => setGate(null)} />}
+        {gate && <Door key={`door-${gate.id}`} region={gate} onAnswer={answerDoor} onLeave={() => setGate(null)} />}
       </AnimatePresence>
+
+      <ConstellationPanel
+        open={constellationOpen}
+        kept={keptSouls}
+        soulLocations={soulLocations}
+        onClose={() => setConstellationOpen(false)}
+        onRelease={handleRelease}
+        onNavigate={(regionId) => {
+          setConstellationOpen(false);
+          enterRegion(regionOf(regionId));
+        }}
+        onEnterVoid={enterVoidWith}
+      />
+
+      <VoidSelector
+        open={voidSelectorOpen}
+        threads={voidThreads}
+        kept={keptSouls}
+        onClose={() => setVoidSelectorOpen(false)}
+        onEnterVoid={enterVoidWith}
+      />
 
       <SoulPanel
         soul={soul}
         found={found}
         open={panel}
+        echoes={echoes}
         onClose={() => setPanel(false)}
+        onMarkSeen={() => {
+          markEchoesSeen();
+          setUnreadEchoes(0);
+        }}
         onReshape={() => {
           setPanel(false);
           setStage("forge");
@@ -314,10 +510,25 @@ export default function U() {
 
 /* ---------- first arrival in The Luminous Fields ---------- */
 
-function Arrival({ soul, onDone }: { soul: Soul; onDone: () => void }) {
+function Arrival({
+  soul,
+  presence,
+  stats,
+  lore,
+  onDone,
+}: {
+  soul: Soul;
+  presence: Record<string, number>;
+  stats: Stats;
+  lore: number;
+  onDone: (target: Region) => void;
+}) {
   useEffect(() => {
     cue("arrive");
   }, []);
+
+  const destination = getBusiestRegion(presence, stats, lore, soul.declared);
+
   const lines = [
     "Welcome, traveler.",
     "You have arrived.",
@@ -353,16 +564,25 @@ function Arrival({ soul, onDone }: { soul: Soul; onDone: () => void }) {
         ))}
       </div>
 
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 2.8, duration: 1 }}
+        className="mt-4 text-[0.56rem] tracking-[0.3em] uppercase text-mist/40"
+      >
+        Drawing you toward {destination.name}
+      </motion.p>
+
       <motion.button
-        onClick={onDone}
-        className="mt-16 rounded-full border border-white/20 px-9 py-3.5 text-[0.62rem] uppercase tracking-[0.35em] text-white/80 transition-colors hover:border-white/50 hover:text-white"
+        onClick={() => onDone(destination)}
+        className="mt-10 rounded-full border border-white/20 px-9 py-3.5 text-[0.62rem] uppercase tracking-[0.35em] text-white/80 transition-colors hover:border-white/50 hover:text-white"
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 3.4, duration: 1 }}
+        transition={{ delay: 3.2, duration: 1 }}
         whileHover={{ scale: 1.04 }}
         whileTap={{ scale: 0.97 }}
       >
-        Wander
+        Wander into {destination.name}
       </motion.button>
     </motion.div>
   );

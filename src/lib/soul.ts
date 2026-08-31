@@ -256,7 +256,81 @@ export const REGIONS: Region[] = [
     women: true,
   },
 ];
-export const regionOf = (id: string) => REGIONS.find((r) => r.id === id) ?? REGIONS[0];
+
+export const isVoidRegion = (id: string) => id === "void" || id.startsWith("void_");
+
+export function getVoidRegionId(soulA: string, soulB: string): string {
+  const min = soulA < soulB ? soulA : soulB;
+  const max = soulA < soulB ? soulB : soulA;
+  return `void_${min}_${max}`;
+}
+
+export function createVoidRegion(
+  partner?: { id?: string; name?: string; shape?: string; color?: string } | null,
+  regionId?: string,
+): Region {
+  return {
+    id: regionId ?? "void",
+    name: partner?.name ? `The Void · ${partner.name}` : "The Void",
+    vibe: partner?.name
+      ? `Private sanctuary with ${partner.name}`
+      : "Black with silver threads · Private Sanctuary",
+    blurb: partner?.name
+      ? `An intimate pocket dimension where only you and ${partner.name} can speak, whisper, and resonate.`
+      : "The hidden sanctuary. A private pocket dimension between souls.",
+    ambient: "silence, and two souls breathing",
+    hex: partner?.color ? colorOf(partner.color).hex : "#c7d2e8",
+    glow: partner?.color ? colorOf(partner.color).glow : "#ffffff",
+    bg: "#000000",
+    world: "blackhole",
+    voice: true,
+  };
+}
+
+export const regionOf = (
+  id: string,
+  partner?: { id?: string; name?: string; shape?: string; color?: string } | null,
+) => {
+  if (isVoidRegion(id)) {
+    return createVoidRegion(partner, id);
+  }
+  return REGIONS.find((r) => r.id === id) ?? REGIONS[0];
+};
+
+/**
+ * Determine the most active region to guide new arrivals directly to where people gather.
+ * Weights live presence heavily and considers historical message activity.
+ */
+export function getBusiestRegion(
+  presence: Record<string, number> = {},
+  stats: Record<string, { souls: number; voices: number }> = {},
+  lore: number = 0,
+  declared?: string | null,
+): Region {
+  const voidOpen = lore >= VOID_AT;
+  const eligible = REGIONS.filter((r) => {
+    if (r.hidden && !voidOpen) return false;
+    if (r.women && declared !== "woman") return false;
+    return true;
+  });
+
+  if (eligible.length === 0) return REGIONS[0];
+
+  let best = eligible[0];
+  let bestScore = -1;
+
+  for (const r of eligible) {
+    const live = presence[r.id] ?? 0;
+    const voices = stats[r.id]?.voices ?? 0;
+    const score = live * 50 + voices;
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
+    }
+  }
+
+  return best;
+}
 
 /* ---------- lore and rank ---------- */
 
