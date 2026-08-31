@@ -10,6 +10,13 @@ export type VoidThread = {
   regionId: string;
 };
 
+type VoidRow = {
+  region: string;
+  text: string;
+  created_at: string;
+  soul: { id: string; name: string; shape: string; color: string } | null;
+};
+
 const STORAGE_KEY = "u_void_threads";
 
 /** Load locally cached Void conversations */
@@ -54,7 +61,7 @@ export async function fetchVoidThreads(mySoulId: string): Promise<VoidThread[]> 
 
     const threadMap = new Map<string, VoidThread>();
 
-    for (const row of data as any[]) {
+    for (const row of data as unknown as VoidRow[]) {
       const region = row.region as string;
       if (!region.startsWith("void_")) continue;
 

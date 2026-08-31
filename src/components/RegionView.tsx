@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Avatar from "@/components/Avatar";
 import type { Soul } from "@/components/SoulForge";
 import {
@@ -80,6 +80,12 @@ export default function RegionView({
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // blocked souls never render, and the list length sets the stacking order below
+  const visible = useMemo(
+    () => msgs.filter((m) => !m.soulId || !blockedIds.has(m.soulId)),
+    [msgs, blockedIds],
+  );
   const [draft, setDraft] = useState("");
   const [fragment, setFragment] = useState<string | null>(null);
   const [showFragment, setShowFragment] = useState(false);
@@ -356,13 +362,14 @@ export default function RegionView({
             </motion.p>
           )}
           <AnimatePresence initial={false}>
-            {msgs
-              .filter((m) => !m.soulId || !blockedIds.has(m.soulId))
-              .map((m, i) => (
+            {visible.map((m, i) => (
                 <Message
                   key={m.id}
                   m={m}
                   i={i}
+                  // rows earlier in the list must paint above later ones, or an
+                  // open ⋯ menu is covered by whatever was said next
+                  stack={visible.length - i}
                   accent={region.glow}
                   onResonate={() => resonate(m.id)}
                   onBlock={m.soulId && !m.mine ? () => onBlock(m.soulId!) : undefined}
@@ -625,6 +632,7 @@ export default function RegionView({
 function Message({
   m,
   i,
+  stack,
   accent,
   onResonate,
   onBlock,
@@ -636,6 +644,8 @@ function Message({
 }: {
   m: Msg;
   i: number;
+  /** z-index for this row; higher rows sit above the ones below them */
+  stack: number;
   accent: string;
   onResonate: () => void;
   onBlock?: () => void;
@@ -656,7 +666,8 @@ function Message({
       animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ delay: Math.min(i * 0.06, 0.5), type: "spring", stiffness: 150, damping: 20 }}
-      className={`flex items-start gap-4 ${m.mine ? "flex-row-reverse text-right" : ""}`}
+      style={{ zIndex: stack }}
+      className={`relative flex items-start gap-4 ${m.mine ? "flex-row-reverse text-right" : ""}`}
     >
       <Avatar soul={{ shape: m.shape, color: m.color, aura: "glow" }} size={40} />
       <div className={`max-w-[75%] ${m.mine ? "items-end" : ""}`}>

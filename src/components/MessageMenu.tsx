@@ -88,10 +88,10 @@ export default function MessageMenu({
                   <p className="px-2.5 pb-1 pt-1.5 text-[0.55rem] tracking-[0.24em] text-mist/40 uppercase">
                     Reason for report
                   </p>
-                  {(["spam", "harassment", "inappropriate", "other"] as const).map((r) => (
+                  {(["spam", "harassment", "inappropriate", "other"] satisfies ReportReason[]).map((r) => (
                     <button
                       key={r}
-                      onClick={() => handleReport(r as ReportReason)}
+                      onClick={() => handleReport(r)}
                       className="w-full rounded-xl px-3 py-2 text-left text-[0.62rem] tracking-[0.22em] text-mist/75 uppercase transition-colors hover:bg-white/[0.08] hover:text-white"
                     >
                       {r}

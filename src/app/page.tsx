@@ -110,11 +110,14 @@ export default function U() {
     loadStats().then(setStats).catch(() => {});
   }, [stage]);
 
-  const refreshEchoes = useCallback(async () => {
+  const refreshEchoes = useCallback(() => {
     if (!soulId) return;
-    const items = await fetchEchoes(soulId).catch(() => []);
-    setEchoes(items);
-    setUnreadEchoes(getUnreadEchoCount(items));
+    fetchEchoes(soulId)
+      .then((items) => {
+        setEchoes(items);
+        setUnreadEchoes(getUnreadEchoCount(items));
+      })
+      .catch(() => {});
   }, [soulId]);
 
   // load blocks + constellation + inbox once the soul is known
@@ -413,30 +416,51 @@ export default function U() {
           </motion.button>
         )}
         {stage === "map" && (
-          <motion.button
+          /* positioned wrapper — the dropdown anchors itself to this */
+          <motion.div
             key="constellation-button"
-            onClick={() => setConstellationOpen(true)}
-            className="absolute right-6 bottom-6 z-40 flex items-center gap-2.5 rounded-full border border-white/10 bg-black/40 py-2 pr-4 pl-3 backdrop-blur-md transition-colors hover:border-white/30 md:right-8 md:bottom-8"
-            initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
+            data-constellation
+            className="absolute top-5 right-5 z-50 md:top-6 md:right-6"
+            initial={{ opacity: 0, y: -16, filter: "blur(8px)" }}
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: 20 }}
+            exit={{ opacity: 0, y: -16 }}
             transition={{ delay: 0.65, duration: 0.6 }}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            aria-label="Your constellation"
           >
-            <svg viewBox="0 0 24 24" className="h-4 w-4 text-mist/60" fill="currentColor">
-              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
-            </svg>
-            <span className="text-[0.56rem] uppercase tracking-[0.28em] text-mist/55">
-              Constellation
-            </span>
-            {keptSouls.length > 0 && (
-              <span className="grid h-4 w-4 place-items-center rounded-full bg-white/15 text-[0.5rem] text-mist/80">
-                {keptSouls.length}
+            <motion.button
+              onClick={() => setConstellationOpen((o) => !o)}
+              className="flex items-center gap-2.5 rounded-full border border-white/10 bg-black/40 py-2 pr-4 pl-3 backdrop-blur-md transition-colors hover:border-white/30"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              aria-haspopup="menu"
+              aria-expanded={constellationOpen}
+              aria-label="Your constellation"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4 text-mist/60" fill="currentColor">
+                <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+              </svg>
+              <span className="hidden text-[0.56rem] uppercase tracking-[0.28em] text-mist/55 sm:block">
+                Constellation
               </span>
-            )}
-          </motion.button>
+              {keptSouls.length > 0 && (
+                <span className="grid h-4 w-4 place-items-center rounded-full bg-white/15 text-[0.5rem] text-mist/80">
+                  {keptSouls.length}
+                </span>
+              )}
+            </motion.button>
+
+            <ConstellationPanel
+              open={constellationOpen}
+              kept={keptSouls}
+              soulLocations={soulLocations}
+              onClose={() => setConstellationOpen(false)}
+              onRelease={handleRelease}
+              onNavigate={(regionId) => {
+                setConstellationOpen(false);
+                enterRegion(regionOf(regionId));
+              }}
+              onEnterVoid={enterVoidWith}
+            />
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -465,19 +489,6 @@ export default function U() {
       <AnimatePresence>
         {gate && <Door key={`door-${gate.id}`} region={gate} onAnswer={answerDoor} onLeave={() => setGate(null)} />}
       </AnimatePresence>
-
-      <ConstellationPanel
-        open={constellationOpen}
-        kept={keptSouls}
-        soulLocations={soulLocations}
-        onClose={() => setConstellationOpen(false)}
-        onRelease={handleRelease}
-        onNavigate={(regionId) => {
-          setConstellationOpen(false);
-          enterRegion(regionOf(regionId));
-        }}
-        onEnterVoid={enterVoidWith}
-      />
 
       <VoidSelector
         open={voidSelectorOpen}

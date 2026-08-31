@@ -18,6 +18,15 @@ export type ResonanceNotice = {
 
 const INBOX_KEY = "u:inbox:last_seen";
 
+// what PostgREST hands back for the embed below; the embedded soul arrives as
+// an object or a one-element array depending on how it infers the relationship
+type ResonanceRow = {
+  message_id: string;
+  soul_id: string;
+  created_at: string;
+  souls: { name: string; shape: string; color: string } | { name: string; shape: string; color: string }[] | null;
+};
+
 /** Load recent resonances left on messages created by this soul. */
 export async function fetchEchoes(soulId: string): Promise<ResonanceNotice[]> {
   const c = client();
@@ -69,7 +78,7 @@ export async function fetchEchoes(soulId: string): Promise<ResonanceNotice[]> {
 
   if (error || !resData) return [];
 
-  return resData.map((r: any) => {
+  return (resData as unknown as ResonanceRow[]).map((r) => {
     const msg = msgMap.get(r.message_id);
     const soulInfo = Array.isArray(r.souls) ? r.souls[0] : r.souls;
     return {

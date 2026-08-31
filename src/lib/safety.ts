@@ -5,7 +5,8 @@
 
 import { client } from "@/lib/db";
 
-export type ReportReason = "offensive" | "spam" | "other";
+/** Must stay in step with the reports_reason_check constraint in the database. */
+export type ReportReason = "spam" | "harassment" | "inappropriate" | "other";
 
 /** Every soul ID this soul has blocked — loaded once on arrival, updated locally on new blocks. */
 export async function loadBlocks(soulId: string): Promise<Set<string>> {
