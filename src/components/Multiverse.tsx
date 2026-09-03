@@ -77,11 +77,13 @@ export default function Multiverse({
 
   return (
     <motion.div
-      className="relative h-full w-full overflow-hidden"
+      className="absolute inset-0 overflow-hidden"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, filter: "blur(14px)", scale: 1.04 }}
-      transition={{ duration: 0.8 }}
+      // fast and out of the way: the planet's own morph carries the transition,
+      // and a slow fade here just leaves a grey veil sitting over it
+      exit={{ opacity: 0, transition: { duration: 0.28, ease: "easeIn" } }}
+      transition={{ duration: 0.6 }}
     >
       <motion.header
         className="pointer-events-none absolute inset-x-0 top-8 z-30 flex flex-col items-center px-4 text-center md:top-10"
@@ -326,13 +328,22 @@ function World({
   const orbit = Array.from({ length: Math.min(here, 8) }, (_, k) => k);
   const busy = (stat?.voices ?? 0) + here;
 
+  // The world drifts forever, and the atmosphere inside it is the shared element
+  // that grows into the room. A layout animation measures boxes in viewport space,
+  // so a parent still drifting mid-flight drags the morph sideways as it goes.
+  // Stop the drift the instant it is tapped, and the growth runs straight.
+  const [opening, setOpening] = useState(false);
+
   return (
     <motion.button
       onPointerEnter={onHover}
       onPointerLeave={onLeave}
       onFocus={onHover}
       onBlur={onLeave}
-      onClick={onOpen}
+      onClick={() => {
+        setOpening(true);
+        onOpen();
+      }}
       className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full outline-none"
       style={{
         left: `${p.x}%`,
@@ -344,14 +355,18 @@ function World({
       animate={{
         opacity: dimmed ? 0.35 : 1,
         scale: 1,
-        y: reduce ? 0 : [0, -14, 0, 10, 0],
-        x: reduce ? 0 : [0, 8, 0, -8, 0],
+        y: reduce || opening ? 0 : [0, -14, 0, 10, 0],
+        x: reduce || opening ? 0 : [0, 8, 0, -8, 0],
       }}
       transition={{
         opacity: { duration: 0.5 },
         scale: { delay: 0.15 + i * 0.12, type: "spring", stiffness: 90, damping: 14 },
-        y: { duration: 16 + i * 3, repeat: Infinity, ease: "easeInOut" },
-        x: { duration: 21 + i * 2, repeat: Infinity, ease: "easeInOut" },
+        y: opening
+          ? { duration: 0.2, ease: "easeOut" }
+          : { duration: 16 + i * 3, repeat: Infinity, ease: "easeInOut" },
+        x: opening
+          ? { duration: 0.2, ease: "easeOut" }
+          : { duration: 21 + i * 2, repeat: Infinity, ease: "easeInOut" },
       }}
       whileHover={{ scale: locked ? 1.04 : 1.14 }}
       whileTap={{ scale: locked ? 1 : 0.95 }}

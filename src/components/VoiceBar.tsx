@@ -69,43 +69,45 @@ export default function VoiceBar({
             {connecting ? "opening the line" : big ? "join the voices" : "join voice"}
           </motion.button>
         ) : (
-          <>
-            <motion.button
-              onClick={onToggleMic}
-              whileTap={{ scale: 0.92 }}
-              className="grid h-10 w-10 place-items-center rounded-full border transition-colors"
-              style={{
-                borderColor: micOn ? `${region.hex}66` : "#ff5c5c66",
-                color: micOn ? region.glow : "#ff8a8a",
-              }}
-              aria-pressed={!micOn}
-              aria-label={micOn ? "Mute yourself" : "Unmute yourself"}
-              title={micOn ? "Mute yourself" : "Unmute yourself"}
-            >
-              <Mic on={micOn} />
-            </motion.button>
-            <motion.button
-              onClick={onToggleDeafen}
-              whileTap={{ scale: 0.92 }}
-              className="grid h-10 w-10 place-items-center rounded-full border transition-colors"
-              style={{
-                borderColor: deafened ? "#ff5c5c66" : `${region.hex}66`,
-                color: deafened ? "#ff8a8a" : region.glow,
-              }}
-              aria-pressed={deafened}
-              aria-label={deafened ? "Hear the room again" : "Stop hearing the room"}
-              title={deafened ? "Hear the room again" : "Stop hearing the room"}
-            >
-              <Ear on={!deafened} />
-            </motion.button>
+          <motion.div
+            className="flex items-center gap-2"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 26 }}
+          >
+            {/* the two switches that are yours, held together in one pill */}
+            <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/45 p-1 backdrop-blur-md">
+              <Switch
+                on={micOn}
+                accent={region.glow}
+                onClick={onToggleMic}
+                label={micOn ? "Mute yourself" : "Unmute yourself"}
+              >
+                <Mic on={micOn} />
+              </Switch>
+              <Switch
+                on={!deafened}
+                accent={region.glow}
+                onClick={onToggleDeafen}
+                label={deafened ? "Hear the room again" : "Stop hearing the room"}
+              >
+                <Ear on={!deafened} />
+              </Switch>
+            </div>
+
             <motion.button
               onClick={onLeave}
+              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.94 }}
-              className="rounded-full border border-red-400/30 px-4 py-2.5 text-[0.55rem] tracking-[0.28em] text-red-300/80 uppercase transition-colors hover:border-red-400/70 hover:text-red-300"
+              className="grid h-9 w-11 place-items-center rounded-full bg-red-500/85 text-white transition-colors hover:bg-red-500"
+              aria-label="Leave voice"
+              title="Leave voice"
             >
-              Leave voice
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+                <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85a.9.9 0 0 1-1.27-.02L.29 13.08a.9.9 0 0 1 .02-1.29A16.94 16.94 0 0 1 12 7c4.5 0 8.62 1.74 11.69 4.79a.9.9 0 0 1 .02 1.29l-2.62 2.47a.9.9 0 0 1-1.27.02 11.6 11.6 0 0 0-2.66-1.85.99.99 0 0 1-.56-.9v-3.1A15.3 15.3 0 0 0 12 9z" />
+              </svg>
             </motion.button>
-          </>
+          </motion.div>
         )}
       </div>
 
@@ -121,6 +123,38 @@ export default function VoiceBar({
         </p>
       )}
     </div>
+  );
+}
+
+/** One of your own switches: lit when on, red and struck through when off. */
+function Switch({
+  on,
+  accent,
+  onClick,
+  label,
+  children,
+}: {
+  on: boolean;
+  accent: string;
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.button
+      onClick={onClick}
+      whileTap={{ scale: 0.9 }}
+      className="grid h-9 w-9 place-items-center rounded-full transition-colors"
+      style={{
+        background: on ? "transparent" : "#ff5c5c1f",
+        color: on ? accent : "#ff8a8a",
+      }}
+      aria-pressed={!on}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </motion.button>
   );
 }
 

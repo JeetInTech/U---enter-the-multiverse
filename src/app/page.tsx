@@ -374,6 +374,15 @@ export default function U() {
           />
         )}
 
+      </AnimatePresence>
+
+      {/*
+        The map and a room share layoutIds — the planet you tap grows into the room
+        you land in. That morph needs both of them mounted at once, so this presence
+        is deliberately not mode="wait": with "wait" the map is gone before the room
+        exists and there is nothing to morph between, which reads as a hard cut.
+      */}
+      <AnimatePresence>
         {stage === "map" && (
           <Multiverse
             key="map"

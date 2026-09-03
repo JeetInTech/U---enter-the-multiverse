@@ -260,7 +260,14 @@ export default function RegionView({
   };
 
   return (
-    <motion.div className="relative flex h-full w-full flex-col">
+    <motion.div
+      className="absolute inset-0 flex flex-col"
+      // the room's own chrome fades; the atmosphere behind it shrinks back into
+      // the planet on its own, through the shared layoutId below
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: { duration: 0.45, delay: 0.1 } }}
+      exit={{ opacity: 0, transition: { duration: 0.25, ease: "easeIn" } }}
+    >
       {/* the region itself, grown out of its card on the map */}
       <motion.div
         layoutId={`region-${region.id}`}
@@ -791,7 +798,8 @@ function Presence({ region, count }: { region: Region; count: number }) {
           style={{
             background: region.glow,
             left: `${(i * 37) % 100}%`,
-            top: `${(i * 53) % 100}%`,
+            // the lower quarter belongs to the label, so keep the dots above it
+            top: `${((i * 53) % 100) * 0.68}%`,
             boxShadow: `0 0 12px ${region.hex}`,
           }}
           animate={{ y: [0, -10, 4, 0], x: [0, 6, -4, 0], opacity: [0.25, 0.8, 0.4, 0.25] }}

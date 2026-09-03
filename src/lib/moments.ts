@@ -113,13 +113,26 @@ export function getMomentStatus(now: Date = new Date()): MomentStatus {
   };
 }
 
-/** React hook for real-time live moment tracking. */
+/**
+ * React hook for live moment tracking.
+ *
+ * The countdown reads in minutes, so a new object every second would be a whole
+ * re-render of everything under it for a string that did not change — and on a
+ * page this full of animation that is not free: it interrupts exit animations
+ * mid-flight. Check often, publish only when the visible text actually moves.
+ */
 export function useLiveMoment(): MomentStatus {
   const [status, setStatus] = useState<MomentStatus>(() => getMomentStatus());
 
   useEffect(() => {
-    const tick = () => setStatus(getMomentStatus());
-    const interval = setInterval(tick, 1000);
+    const interval = setInterval(() => {
+      setStatus((prev) => {
+        const next = getMomentStatus();
+        return next.displayText === prev.displayText && next.active?.id === prev.active?.id
+          ? prev
+          : next;
+      });
+    }, 1000);
     return () => clearInterval(interval);
   }, []);
 
