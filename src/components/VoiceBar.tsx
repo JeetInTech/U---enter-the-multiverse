@@ -10,22 +10,28 @@ export default function VoiceBar({
   joined,
   connecting,
   micOn,
+  deafened,
   speakers,
   error,
   onJoin,
   onLeave,
   onToggleMic,
+  onToggleDeafen,
+  onMuteSoul,
   big = false,
 }: {
   region: Region;
   joined: boolean;
   connecting: boolean;
   micOn: boolean;
+  deafened: boolean;
   speakers: Speaker[];
   error: string | null;
   onJoin: () => void;
   onLeave: () => void;
   onToggleMic: () => void;
+  onToggleDeafen: () => void;
+  onMuteSoul: (soulId: string) => void;
   big?: boolean;
 }) {
   return (
@@ -41,7 +47,7 @@ export default function VoiceBar({
             exit={{ opacity: 0, y: 10 }}
           >
             {speakers.map((s) => (
-              <Talking key={s.id} s={s} big={big} />
+              <Talking key={s.id} s={s} big={big} onMute={() => onMuteSoul(s.soul)} />
             ))}
           </motion.div>
         )}
@@ -72,9 +78,25 @@ export default function VoiceBar({
                 borderColor: micOn ? `${region.hex}66` : "#ff5c5c66",
                 color: micOn ? region.glow : "#ff8a8a",
               }}
+              aria-pressed={!micOn}
               aria-label={micOn ? "Mute yourself" : "Unmute yourself"}
+              title={micOn ? "Mute yourself" : "Unmute yourself"}
             >
               <Mic on={micOn} />
+            </motion.button>
+            <motion.button
+              onClick={onToggleDeafen}
+              whileTap={{ scale: 0.92 }}
+              className="grid h-10 w-10 place-items-center rounded-full border transition-colors"
+              style={{
+                borderColor: deafened ? "#ff5c5c66" : `${region.hex}66`,
+                color: deafened ? "#ff8a8a" : region.glow,
+              }}
+              aria-pressed={deafened}
+              aria-label={deafened ? "Hear the room again" : "Stop hearing the room"}
+              title={deafened ? "Hear the room again" : "Stop hearing the room"}
+            >
+              <Ear on={!deafened} />
             </motion.button>
             <motion.button
               onClick={onLeave}
@@ -103,7 +125,7 @@ export default function VoiceBar({
 }
 
 /** One voice in the room. The ring is live: it grows while they are talking. */
-function Talking({ s, big }: { s: Speaker; big: boolean }) {
+function Talking({ s, big, onMute }: { s: Speaker; big: boolean; onMute: () => void }) {
   const c = colorOf(s.color);
   const size = big ? 84 : 40;
   return (
@@ -116,17 +138,33 @@ function Talking({ s, big }: { s: Speaker; big: boolean }) {
     >
       <motion.div
         className="relative grid place-items-center rounded-full"
-        style={{ padding: big ? 8 : 4 }}
+        style={{ padding: big ? 8 : 4, opacity: s.muted ? 0.4 : 1 }}
         animate={{
-          boxShadow: s.speaking
+          boxShadow: s.speaking && !s.muted
             ? `0 0 0 2px ${c.hex}, 0 0 26px 6px ${c.hex}88`
             : `0 0 0 1px #ffffff14`,
-          scale: s.speaking ? 1.06 : 1,
+          scale: s.speaking && !s.muted ? 1.06 : 1,
         }}
         transition={{ duration: 0.16 }}
       >
         <Avatar soul={{ shape: s.shape, color: s.color, aura: "glow" }} size={size} />
-        {s.speaking && (
+
+        {/* silence one voice without leaving the room */}
+        {!s.me && (
+          <button
+            onClick={onMute}
+            aria-pressed={!!s.muted}
+            aria-label={s.muted ? `Hear ${s.name} again` : `Silence ${s.name}`}
+            title={s.muted ? `Hear ${s.name} again` : `Silence ${s.name}`}
+            className={`absolute -right-1 -bottom-1 grid h-5 w-5 place-items-center rounded-full border border-white/15 bg-black/80 transition-colors hover:border-white/40 ${
+              s.muted ? "text-red-300" : "text-mist/45 hover:text-white"
+            }`}
+          >
+            <Mic on={!s.muted} small />
+          </button>
+        )}
+
+        {s.speaking && !s.muted && (
           <motion.span
             className="absolute inset-0 rounded-full border"
             style={{ borderColor: c.glow }}
@@ -142,6 +180,7 @@ function Talking({ s, big }: { s: Speaker; big: boolean }) {
       >
         {s.name}
         {s.me ? " · you" : ""}
+        {s.muted ? " · silenced" : ""}
       </span>
       {/* say plainly whether the line is actually open */}
       {!s.me && s.state !== "connected" && (
@@ -156,9 +195,27 @@ function Talking({ s, big }: { s: Speaker; big: boolean }) {
   );
 }
 
-function Mic({ on }: { on: boolean }) {
+/** Headphones, struck through when you have stopped listening. */
+function Ear({ on }: { on: boolean }) {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.6}>
+      <path d="M4 14v-2a8 8 0 0 1 16 0v2" strokeLinecap="round" />
+      <rect x="2.5" y="13.5" width="4.5" height="7" rx="2" />
+      <rect x="17" y="13.5" width="4.5" height="7" rx="2" />
+      {!on && <path d="M4 4l16 16" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
+function Mic({ on, small = false }: { on: boolean; small?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={small ? "h-2.5 w-2.5" : "h-4 w-4"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={small ? 2.4 : 1.6}
+    >
       <rect x="9" y="3" width="6" height="11" rx="3" />
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" />
       {!on && <path d="M4 4l16 16" strokeLinecap="round" />}

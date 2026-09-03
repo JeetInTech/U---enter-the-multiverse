@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { ReportReason } from "@/lib/safety";
+import type { RequestStatus } from "@/lib/constellation";
 
 /**
  * Three-dot context menu attached to a message bubble.
@@ -11,7 +12,7 @@ import type { ReportReason } from "@/lib/safety";
  */
 export default function MessageMenu({
   soulName,
-  isKept = false,
+  link,
   onKeep,
   onRelease,
   onEnterVoid,
@@ -19,7 +20,8 @@ export default function MessageMenu({
   onReport,
 }: {
   soulName: string;
-  isKept?: boolean;
+  /** where you stand with this soul: undefined means you have never asked */
+  link?: RequestStatus;
   onKeep?: () => void;
   onRelease?: () => void;
   onEnterVoid?: () => void;
@@ -117,17 +119,28 @@ export default function MessageMenu({
                       ✦ Whisper in The Void
                     </button>
                   )}
-                  {(onKeep || onRelease) && (
-                    <button
-                      onClick={() => {
-                        if (isKept) onRelease?.();
-                        else onKeep?.();
-                        close();
-                      }}
-                      className="w-full rounded-xl px-3 py-2.5 text-left text-[0.6rem] tracking-[0.22em] text-mist/65 uppercase transition-colors hover:bg-white/[0.07] hover:text-white"
-                    >
-                      {isKept ? "Release from constellation" : "Keep this soul"}
-                    </button>
+                  {link === "rejected" ? (
+                    // they said no; there is nothing to click, and no way to ask again
+                    <p className="px-3 py-2.5 text-[0.6rem] tracking-[0.22em] text-mist/30 uppercase">
+                      They would rather not
+                    </p>
+                  ) : (
+                    (onKeep || onRelease) && (
+                      <button
+                        onClick={() => {
+                          if (link) onRelease?.();
+                          else onKeep?.();
+                          close();
+                        }}
+                        className="w-full rounded-xl px-3 py-2.5 text-left text-[0.6rem] tracking-[0.22em] text-mist/65 uppercase transition-colors hover:bg-white/[0.07] hover:text-white"
+                      >
+                        {link === "accepted"
+                          ? "Release from constellation"
+                          : link === "pending"
+                            ? "Withdraw the request"
+                            : "Ask to keep this soul"}
+                      </button>
+                    )
                   )}
                   <button
                     onClick={() => setReporting(true)}

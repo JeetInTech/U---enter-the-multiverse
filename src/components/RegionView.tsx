@@ -29,6 +29,7 @@ import { uploadPhoto } from "@/lib/db";
 import { LORE, colorOf, rankFor, type Msg, type Region } from "@/lib/soul";
 import MessageMenu from "@/components/MessageMenu";
 import { reportMessage, type ReportReason } from "@/lib/safety";
+import type { RequestStatus } from "@/lib/constellation";
 import type { LiveMoment } from "@/lib/moments";
 
 const CUE_FOR: Record<Ritual["kind"], Parameters<typeof cue>[0] | null> = {
@@ -50,7 +51,7 @@ export default function RegionView({
   found,
   present,
   blockedIds,
-  keptIds,
+  linkStatus,
   unreadEchoes = 0,
   activeMoment,
   onProfile,
@@ -67,7 +68,8 @@ export default function RegionView({
   found: number[];
   present: number;
   blockedIds: Set<string>;
-  keptIds: Set<string>;
+  /** soul id → where you stand with them; absent means you have never asked */
+  linkStatus: Record<string, RequestStatus>;
   unreadEchoes?: number;
   activeMoment?: LiveMoment | null;
   onProfile: () => void;
@@ -344,7 +346,16 @@ export default function RegionView({
           >
             {region.blurb}
           </motion.p>
-          <VoiceBar big region={region} {...voice} onJoin={voice.join} onLeave={voice.leave} onToggleMic={voice.toggleMic} />
+          <VoiceBar
+            big
+            region={region}
+            {...voice}
+            onJoin={voice.join}
+            onLeave={voice.leave}
+            onToggleMic={voice.toggleMic}
+            onToggleDeafen={voice.toggleDeafen}
+            onMuteSoul={voice.toggleMuteSoul}
+          />
         </div>
       ) : (
       <>
@@ -379,7 +390,7 @@ export default function RegionView({
                           reportMessage(m.id, soulId, reason).catch(() => {})
                       : undefined
                   }
-                  isKept={m.soulId ? keptIds.has(m.soulId) : false}
+                  link={m.soulId ? linkStatus[m.soulId] : undefined}
                   onKeep={
                     m.soulId && !m.mine
                       ? () => onKeep(m.soulId!, { name: m.soul, shape: m.shape, color: m.color })
@@ -387,7 +398,8 @@ export default function RegionView({
                   }
                   onRelease={m.soulId && !m.mine ? () => onRelease(m.soulId!) : undefined}
                   onEnterVoid={
-                    m.soulId && !m.mine && onEnterVoid
+                    // a pocket dimension only opens between souls who both agreed
+                    m.soulId && !m.mine && onEnterVoid && linkStatus[m.soulId] === "accepted"
                       ? () => onEnterVoid({ id: m.soulId!, name: m.soul, shape: m.shape, color: m.color })
                       : undefined
                   }
@@ -405,6 +417,8 @@ export default function RegionView({
             {...voice}
             onJoin={voice.join}
             onLeave={voice.leave}
+            onToggleDeafen={voice.toggleDeafen}
+            onMuteSoul={voice.toggleMuteSoul}
             onToggleMic={voice.toggleMic}
           />
         </div>
@@ -637,7 +651,7 @@ function Message({
   onResonate,
   onBlock,
   onReport,
-  isKept,
+  link,
   onKeep,
   onRelease,
   onEnterVoid,
@@ -650,7 +664,7 @@ function Message({
   onResonate: () => void;
   onBlock?: () => void;
   onReport?: (reason: ReportReason) => void;
-  isKept?: boolean;
+  link?: RequestStatus;
   onKeep?: () => void;
   onRelease?: () => void;
   onEnterVoid?: () => void;
@@ -682,7 +696,7 @@ function Message({
               soulName={m.soul}
               onBlock={onBlock}
               onReport={onReport}
-              isKept={isKept}
+              link={link}
               onKeep={onKeep}
               onRelease={onRelease}
               onEnterVoid={onEnterVoid}

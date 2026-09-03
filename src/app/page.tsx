@@ -28,7 +28,17 @@ import {
 import { cue, enterRegion as soundOf, isMuted, onMuteChange, setMuted, wake } from "@/lib/audio";
 import { TAGLINES, colorOf, createVoidRegion, getBusiestRegion, getVoidRegionId, rankFor, regionOf, type Region } from "@/lib/soul";
 import { blockSoul, loadBlocks } from "@/lib/safety";
-import { keepSoul, loadConstellation, releaseSoul, type KeptSoul } from "@/lib/constellation";
+import {
+  answerRequest,
+  connected as acceptedOf,
+  incoming as incomingOf,
+  keepSoul,
+  loadLinks,
+  outgoing as outgoingOf,
+  releaseSoul,
+  watchLinks,
+  type KeptSoul,
+} from "@/lib/constellation";
 import { fetchEchoes, getUnreadEchoCount, markEchoesSeen, type ResonanceNotice } from "@/lib/inbox";
 import { useLiveMoment } from "@/lib/moments";
 import { cacheVoidThread, fetchVoidThreads, type VoidThread } from "@/lib/void";
@@ -49,7 +59,8 @@ export default function U() {
   const [gate, setGate] = useState<Region | null>(null);
   const [muted, setMutedState] = useState(false);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
-  const [keptSouls, setKeptSouls] = useState<KeptSoul[]>([]);
+  // every link either way, in every state; the three lists below are views of it
+  const [links, setLinks] = useState<KeptSoul[]>([]);
   const [soulLocations, setSoulLocations] = useState<Record<string, string>>({});
   const [constellationOpen, setConstellationOpen] = useState(false);
   const [voidSelectorOpen, setVoidSelectorOpen] = useState(false);
@@ -57,7 +68,14 @@ export default function U() {
   const [partnerSoul, setPartnerSoul] = useState<{ id: string; name: string; shape: string; color: string } | null>(null);
   const [echoes, setEchoes] = useState<ResonanceNotice[]>([]);
   const [unreadEchoes, setUnreadEchoes] = useState(0);
-  const keptIds = useMemo(() => new Set(keptSouls.map((s) => s.id)), [keptSouls]);
+  const keptSouls = useMemo(() => acceptedOf(links), [links]);
+  const requests = useMemo(() => incomingOf(links), [links]);
+  const sentRequests = useMemo(() => outgoingOf(links), [links]);
+  // any link at all counts as asked, so the menu never offers to ask twice
+  const linkStatus = useMemo(
+    () => Object.fromEntries(links.map((s) => [s.id, s.status])),
+    [links],
+  );
   const [soul, setSoul] = useState<Soul>({
     name: "",
     tagline: TAGLINES[0],
@@ -124,13 +142,21 @@ export default function U() {
   useEffect(() => {
     if (!soulId) return;
     loadBlocks(soulId).then(setBlockedIds).catch(() => {});
-    loadConstellation(soulId).then(setKeptSouls).catch(() => {});
+    loadLinks(soulId).then(setLinks).catch(() => {});
     refreshEchoes();
   }, [soulId, refreshEchoes]);
 
   useEffect(() => {
     if (stage === "map") refreshEchoes();
   }, [stage, refreshEchoes]);
+
+  // somebody asking for you, or answering what you asked, should not need a reload
+  useEffect(() => {
+    if (!soulId) return;
+    return watchLinks(soulId, () => {
+      loadLinks(soulId).then(setLinks).catch(() => {});
+    });
+  }, [soulId]);
 
   // one presence channel for the whole multiverse; it follows you from room to room
   useEffect(() => {
@@ -167,7 +193,7 @@ export default function U() {
     setFound([]);
     setReturning(false);
     setRegion(null);
-    setKeptSouls([]);
+    setLinks([]);
     setBlockedIds(new Set());
     setSoulLocations({});
     setSoul({ name: "", tagline: TAGLINES[0], shape: "circle", color: "tide", aura: "glow" });
@@ -207,10 +233,13 @@ export default function U() {
     [soulId],
   );
 
+  /** Ask to keep a soul. They decide; until they do it sits as a sent request. */
   const handleKeep = useCallback(
     (targetId: string, details: { name: string; shape: string; color: string }) => {
-      setKeptSouls((prev) =>
-        prev.some((s) => s.id === targetId) ? prev : [...prev, { id: targetId, ...details }],
+      setLinks((prev) =>
+        prev.some((s) => s.id === targetId)
+          ? prev
+          : [...prev, { id: targetId, ...details, status: "pending", direction: "out" }],
       );
       if (soulId) keepSoul(soulId, targetId).catch(() => {});
     },
@@ -219,8 +248,24 @@ export default function U() {
 
   const handleRelease = useCallback(
     (targetId: string) => {
-      setKeptSouls((prev) => prev.filter((s) => s.id !== targetId));
+      setLinks((prev) => prev.filter((s) => s.id !== targetId));
       if (soulId) releaseSoul(soulId, targetId).catch(() => {});
+    },
+    [soulId],
+  );
+
+  /**
+   * Answer somebody who asked for you. Saying no keeps the row so they cannot
+   * simply ask again — and drops them out of both skies, which is the whole
+   * point of being able to say it.
+   */
+  const handleAnswer = useCallback(
+    (keeperId: string, status: "accepted" | "rejected") => {
+      setLinks((prev) =>
+        prev.map((s) => (s.id === keeperId && s.direction === "in" ? { ...s, status } : s)),
+      );
+      cue(status === "accepted" ? "resonate" : "whisper");
+      if (soulId) answerRequest(keeperId, soulId, status).catch(() => {});
     },
     [soulId],
   );
@@ -349,7 +394,7 @@ export default function U() {
             found={found}
             present={presence[region.id] ?? 1}
             blockedIds={blockedIds}
-            keptIds={keptIds}
+            linkStatus={linkStatus}
             unreadEchoes={unreadEchoes}
             activeMoment={moment.active}
             onProfile={() => setPanel(true)}
@@ -441,10 +486,20 @@ export default function U() {
               <span className="hidden text-[0.56rem] uppercase tracking-[0.28em] text-mist/55 sm:block">
                 Constellation
               </span>
-              {keptSouls.length > 0 && (
-                <span className="grid h-4 w-4 place-items-center rounded-full bg-white/15 text-[0.5rem] text-mist/80">
-                  {keptSouls.length}
-                </span>
+              {requests.length > 0 ? (
+                <motion.span
+                  className="grid h-4 w-4 place-items-center rounded-full bg-amber-400 text-[0.5rem] font-medium text-black"
+                  animate={{ scale: [1, 1.18, 1] }}
+                  transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  {requests.length}
+                </motion.span>
+              ) : (
+                keptSouls.length > 0 && (
+                  <span className="grid h-4 w-4 place-items-center rounded-full bg-white/15 text-[0.5rem] text-mist/80">
+                    {keptSouls.length}
+                  </span>
+                )
               )}
             </motion.button>
 
@@ -453,7 +508,9 @@ export default function U() {
               kept={keptSouls}
               soulLocations={soulLocations}
               onClose={() => setConstellationOpen(false)}
+              requests={requests}
               onRelease={handleRelease}
+              onAnswer={handleAnswer}
               onNavigate={(regionId) => {
                 setConstellationOpen(false);
                 enterRegion(regionOf(regionId));
@@ -493,9 +550,11 @@ export default function U() {
       <VoidSelector
         open={voidSelectorOpen}
         threads={voidThreads}
-        kept={keptSouls}
+        connected={keptSouls}
+        sent={sentRequests}
         onClose={() => setVoidSelectorOpen(false)}
         onEnterVoid={enterVoidWith}
+        onWithdraw={handleRelease}
       />
 
       <SoulPanel

@@ -36,13 +36,18 @@ const ICE: RTCConfiguration = {
 const log = (...a: unknown[]) => console.info("U voice:", ...a);
 
 export type Speaker = {
+  /** this tab's handle in the call — one soul in two tabs is two speakers */
   id: string;
+  /** the soul behind the tab; muting follows this, so it survives a reconnect */
+  soul: string;
   name: string;
   color: string;
   shape: string;
   speaking: boolean;
   state: RTCPeerConnectionState | "self";
   me?: boolean;
+  /** you silenced this one for yourself; they carry on talking to everybody else */
+  muted?: boolean;
 };
 
 type Signal =
@@ -75,6 +80,7 @@ export function useVoice(
   const [joined, setJoined] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [micOn, setMicOn] = useState(true);
+  const [deafened, setDeafened] = useState(false);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,6 +102,11 @@ export function useVoice(
   const channel = useRef<RealtimeChannel | null>(null);
   const ac = useRef<AudioContext | null>(null);
   const raf = useRef(0);
+  // the animation loop and the ontrack handler read these; the setters below keep
+  // them in step, so nothing has to touch a ref during render
+  /** souls you silenced, by soul id so it survives them rejoining on a new tab */
+  const muteRef = useRef<Set<string>>(new Set());
+  const deafRef = useRef(false);
 
   /** Attach a level meter so the ring can pulse when someone actually talks. */
   const meter = useCallback((id: string, s: MediaStream) => {
@@ -209,6 +220,8 @@ export function useVoice(
         el.autoplay = true;
         el.setAttribute("playsinline", "");
         el.srcObject = e.streams[0];
+        // a soul you already silenced must not start talking again on reconnect
+        el.muted = deafRef.current || muteRef.current.has(who.current.get(peerId)?.soul ?? "");
         sink().appendChild(el); // it must be in the document to make any sound
         audios.current.set(peerId, el);
         el.play().catch(() => setError("tap anywhere to let this page play sound"));
@@ -345,12 +358,17 @@ export function useVoice(
           speaking: read() > 0.045,
           state: id === tab() ? "self" : (states.current.get(id) ?? "new"),
           me: id === tab(),
+          muted: id !== tab() && muteRef.current.has(w.soul),
         });
       });
       setSpeakers((prev) =>
         prev.length === now.length &&
         prev.every(
-          (p, i) => p.id === now[i].id && p.speaking === now[i].speaking && p.state === now[i].state,
+          (p, i) =>
+            p.id === now[i].id &&
+            p.speaking === now[i].speaking &&
+            p.state === now[i].state &&
+            p.muted === now[i].muted,
         )
           ? prev
           : now,
@@ -365,14 +383,49 @@ export function useVoice(
   const leave = useCallback(() => {
     teardown();
     setMicOn(true);
+    deafRef.current = false;
+    setDeafened(false);
     setError(null);
   }, [teardown]);
 
-  const toggleMic = useCallback(() => {
+  const setMic = useCallback((on: boolean) => {
     const track = stream.current?.getAudioTracks()[0];
     if (!track) return;
-    track.enabled = !track.enabled;
-    setMicOn(track.enabled);
+    track.enabled = on;
+    setMicOn(on);
+  }, []);
+
+  const toggleMic = useCallback(() => {
+    // coming off deaf by unmuting is what everyone expects, so undeafen with it
+    if (!micOn) setDeafened(false);
+    setMic(!micOn);
+  }, [micOn, setMic]);
+
+  /**
+   * Deafen: stop hearing the room. Your own microphone goes with it, because
+   * talking to people you cannot hear is the one thing nobody means to do.
+   */
+  const toggleDeafen = useCallback(() => {
+    const now = !deafRef.current;
+    deafRef.current = now;
+    setDeafened(now);
+    audios.current.forEach(
+      (el, id) => (el.muted = now || muteRef.current.has(who.current.get(id)?.soul ?? "")),
+    );
+    setMic(!now);
+  }, [setMic]);
+
+  /** Silence one soul, for you only. They never learn, which is the point. */
+  const toggleMuteSoul = useCallback((soulId: string) => {
+    const next = new Set(muteRef.current);
+    if (next.has(soulId)) next.delete(soulId);
+    else next.add(soulId);
+    // no state needed: the level loop below rebuilds every speaker each frame
+    // and only re-renders when a flag like this one actually changed
+    muteRef.current = next;
+    audios.current.forEach(
+      (el, id) => (el.muted = deafRef.current || next.has(who.current.get(id)?.soul ?? "")),
+    );
   }, []);
 
   // walking out of a region hangs up on it
@@ -383,5 +436,17 @@ export function useVoice(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [region]);
 
-  return { joined, connecting, micOn, speakers, error, join, leave, toggleMic };
+  return {
+    joined,
+    connecting,
+    micOn,
+    deafened,
+    speakers,
+    error,
+    join,
+    leave,
+    toggleMic,
+    toggleDeafen,
+    toggleMuteSoul,
+  };
 }

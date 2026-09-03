@@ -15,18 +15,23 @@ import type { KeptSoul } from "@/lib/constellation";
 export default function ConstellationPanel({
   open,
   kept,
+  requests,
   soulLocations,
   onClose,
   onRelease,
+  onAnswer,
   onNavigate,
   onEnterVoid,
 }: {
   open: boolean;
   kept: KeptSoul[];
+  /** souls who have asked to keep you and are waiting on an answer */
+  requests: KeptSoul[];
   /** soulId → regionId, built from the live presence channel. */
   soulLocations: Record<string, string>;
   onClose: () => void;
   onRelease: (soulId: string) => void;
+  onAnswer: (soulId: string, status: "accepted" | "rejected") => void;
   /** Called when the user clicks a world name — should navigate there and close. */
   onNavigate: (regionId: string) => void;
   /** Called when the user wants to enter 1-on-1 Void with this soul */
@@ -75,6 +80,47 @@ export default function ConstellationPanel({
               </p>
             </div>
 
+            {/* somebody asked for you — this comes before everything else */}
+            {requests.length > 0 && (
+              <div className="mb-4 space-y-2">
+                <p className="text-[0.5rem] tracking-[0.24em] text-amber-200/60 uppercase">
+                  {requests.length} soul{requests.length !== 1 ? "s" : ""} asked to keep you
+                </p>
+                {requests.map((s) => {
+                  const c = colorOf(s.color);
+                  return (
+                    <motion.div
+                      key={s.id}
+                      className="rounded-2xl border border-amber-200/15 bg-amber-100/[0.03] px-3 py-2.5"
+                      initial={{ opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Avatar soul={{ shape: s.shape, color: s.color, aura: "glow" }} size={32} />
+                        <p className="min-w-0 flex-1 truncate text-sm" style={{ color: c.glow }}>
+                          {s.name}
+                        </p>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          onClick={() => onAnswer(s.id, "accepted")}
+                          className="flex-1 rounded-full border border-white/15 py-1.5 text-[0.5rem] tracking-[0.24em] text-white/85 uppercase transition-colors hover:border-white/45 hover:bg-white/10"
+                        >
+                          Keep them
+                        </button>
+                        <button
+                          onClick={() => onAnswer(s.id, "rejected")}
+                          className="flex-1 rounded-full border border-white/8 py-1.5 text-[0.5rem] tracking-[0.24em] text-mist/40 uppercase transition-colors hover:border-red-400/40 hover:text-red-300/80"
+                        >
+                          Not now
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* empty state */}
             {kept.length === 0 ? (
               <motion.p
@@ -83,7 +129,7 @@ export default function ConstellationPanel({
                 animate={{ opacity: 1 }}
               >
                 Open ⋯ on any message<br />
-                and tap Keep this soul.
+                and ask to keep a soul.
               </motion.p>
             ) : (
               <div className="max-h-[min(22rem,60vh)] space-y-2 overflow-y-auto">
