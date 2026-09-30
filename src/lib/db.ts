@@ -160,6 +160,29 @@ export async function uploadPhoto(file: File): Promise<string> {
   return c.storage.from("photos").getPublicUrl(path).data.publicUrl;
 }
 
+/**
+ * Unsay something. RLS allows this only for your own message, so passing
+ * somebody else's id simply removes nothing.
+ *
+ * A photograph has to be deleted twice: the row that points at it, and the file
+ * itself. Do the file first — if the row goes and the object does not, the
+ * picture is still sitting on a public URL with nothing left to find it by.
+ */
+export async function deleteMessage(messageId: string, imageUrl?: string | null) {
+  const c = db();
+  if (!c) return;
+
+  if (imageUrl) {
+    // .../storage/v1/object/public/photos/<uid>/<file> — everything after the
+    // bucket name is the object's own path
+    const path = imageUrl.split("/photos/")[1];
+    if (path) await c.storage.from("photos").remove([decodeURIComponent(path)]);
+  }
+
+  const { error } = await c.from("messages").delete().eq("id", messageId);
+  if (error) throw error;
+}
+
 export async function resonate(messageId: string, soulId: string) {
   const c = db();
   if (!c) return;

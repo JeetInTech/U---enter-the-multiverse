@@ -4,7 +4,7 @@
 // carries the souls currently standing inside it around its own orbit.
 
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform, useReducedMotion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Planet from "@/components/Planet";
 import type { Stats } from "@/lib/db";
 import { REGIONS, VOID_AT, getBusiestRegion, regionOf, type Region } from "@/lib/soul";
@@ -32,6 +32,23 @@ const WEB: [string, string][] = [
   ["sisterhood", "luminous"],
 ];
 
+/**
+ * True where the primary input cannot hover. Read through an external store so
+ * the server and the first client render agree — guessing on the server and
+ * correcting afterwards is a hydration mismatch.
+ */
+function useTouch() {
+  return useSyncExternalStore(
+    (cb) => {
+      const q = window.matchMedia("(hover: none)");
+      q.addEventListener("change", cb);
+      return () => q.removeEventListener("change", cb);
+    },
+    () => window.matchMedia("(hover: none)").matches,
+    () => false,
+  );
+}
+
 export default function Multiverse({
   lore,
   stats,
@@ -49,6 +66,10 @@ export default function Multiverse({
   // you can always see the hole at the centre; going into it is another matter
   const visible = REGIONS;
   const [focus, setFocus] = useState<string | null>(null);
+  // A finger cannot hover. On touch the blurb at the bottom would never be seen
+  // at all — the first tap would just open the world — so there a tap previews
+  // and a second tap on the same world goes in.
+  const touch = useTouch();
   const [momentModal, setMomentModal] = useState(false);
   const moment = useLiveMoment();
   const busiest = getBusiestRegion(presence, stats, lore);
@@ -131,6 +152,10 @@ export default function Multiverse({
       <motion.div
         className="absolute inset-0 [transform-style:preserve-3d]"
         style={{ x: leanX, y: leanY, rotateX: tiltX, rotateY: tiltY, perspective: 1200 }}
+        // a tap on the empty sky lets go of whatever world was being previewed
+        onPointerDown={(e) => {
+          if (touch && e.target === e.currentTarget) setFocus(null);
+        }}
       >
         {/* threads between the worlds */}
         <svg className="absolute inset-0 h-full w-full" aria-hidden>
@@ -176,15 +201,23 @@ export default function Multiverse({
             locked={!!r.hidden && !voidOpen}
             dimmed={!!focus && focus !== r.id}
             reduce={!!reduce}
+            touch={touch}
+            previewed={focus === r.id}
             onHover={() => setFocus(r.id)}
             onLeave={() => setFocus((f) => (f === r.id ? null : f))}
+            onPreview={() => setFocus(r.id)}
             onOpen={() => (r.id === "void" && onOpenVoid ? onOpenVoid() : onOpen(r))}
           />
         ))}
       </motion.div>
 
-      {/* ---- what you are looking at ---- */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 px-6 text-center md:bottom-6">
+      {/*
+        ---- what you are looking at ----
+        On a phone this sits in the same corner as the profile pill and lands on
+        top of whichever worlds hang low, so it gets cleared past the pill and a
+        scrim to read against. On a wide screen there is room and neither applies.
+      */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/85 via-black/45 to-transparent px-6 pt-14 pb-[calc(6.5rem+var(--safe-b))] text-center md:bottom-6 md:bg-none md:pt-0 md:pb-0">
         <motion.div
           key={active?.id ?? "none"}
           initial={{ opacity: 0, y: 14, filter: "blur(10px)" }}
@@ -207,6 +240,17 @@ export default function Multiverse({
                 {active.photos ? " · photographs" : ""}
                 {active.women ? " · women only" : ""}
               </p>
+              {touch && (
+                <motion.p
+                  className="mt-2.5 text-[0.55rem] uppercase tracking-[0.3em]"
+                  style={{ color: active.glow }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: [0.45, 0.9, 0.45] }}
+                  transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  tap again to enter
+                </motion.p>
+              )}
             </>
           ) : (
             <p className="text-[0.58rem] uppercase tracking-[0.35em] text-mist/25">
@@ -308,8 +352,11 @@ function World({
   dimmed,
   locked,
   reduce,
+  touch,
+  previewed,
   onHover,
   onLeave,
+  onPreview,
   onOpen,
 }: {
   r: Region;
@@ -320,8 +367,11 @@ function World({
   dimmed: boolean;
   locked: boolean;
   reduce: boolean;
+  touch: boolean;
+  previewed: boolean;
   onHover: () => void;
   onLeave: () => void;
+  onPreview: () => void;
   onOpen: () => void;
 }) {
   const p = PLACE[r.id];
@@ -336,11 +386,16 @@ function World({
 
   return (
     <motion.button
-      onPointerEnter={onHover}
-      onPointerLeave={onLeave}
+      onPointerEnter={touch ? undefined : onHover}
+      onPointerLeave={touch ? undefined : onLeave}
       onFocus={onHover}
-      onBlur={onLeave}
+      onBlur={touch ? undefined : onLeave}
       onClick={() => {
+        // on touch the first tap only shows you what this world is
+        if (touch && !previewed) {
+          onPreview();
+          return;
+        }
         setOpening(true);
         onOpen();
       }}
@@ -387,10 +442,18 @@ function World({
 
       {/* the body itself: bands, weather, rings, moons */}
       <Planet region={r} reduce={reduce} />
+      {/*
+        This used to be blur-2xl over the gradient below — a 40px blur applied to
+        something already soft, on all eight worlds, each pulsing forever. Blurred
+        layers re-rasterise, so it was the most expensive thing on the map for no
+        visible gain. Extra colour stops carry the same falloff for free.
+      */}
       <motion.span
         layoutId={`bloom-${r.id}`}
-        className="pointer-events-none absolute -inset-6 block rounded-full blur-2xl"
-        style={{ background: `radial-gradient(circle, ${r.hex}66, transparent 70%)` }}
+        className="pointer-events-none absolute -inset-6 block rounded-full"
+        style={{
+          background: `radial-gradient(circle, ${r.hex}55 0%, ${r.hex}33 38%, ${r.hex}14 58%, transparent 74%)`,
+        }}
         animate={{ opacity: reduce ? 0.5 : [0.4, 0.85, 0.4] }}
         transition={{ duration: 5 + i, repeat: Infinity, ease: "easeInOut" }}
       />

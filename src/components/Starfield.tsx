@@ -162,10 +162,16 @@ export default function Starfield({
     const pointer = { x: 0, y: 0, tx: 0, ty: 0 };
     let warpEase = 0;
     let raf = 0;
+    let last = 0;
 
     const seed = () => {
+      // Every mote is an arc fill on every frame, so the count is the single
+      // biggest lever on how hard this canvas works. A phone does not need a
+      // desktop's worth of them to read as a sky.
+      const scale = Math.min(1, (window.innerWidth * window.innerHeight) / (1280 * 800));
+      const n = Math.round(count * Math.max(0.4, scale));
       dots.length = 0;
-      for (let i = 0; i < count; i++)
+      for (let i = 0; i < n; i++)
         dots.push({
           x: Math.random(),
           y: Math.random(),
@@ -191,13 +197,28 @@ export default function Starfield({
 
     const frame = (t: number) => {
       raf = requestAnimationFrame(frame);
-      warpEase += (warpRef.current - warpEase) * 0.06;
-      pointer.x += (pointer.tx - pointer.x) * 0.05;
-      pointer.y += (pointer.ty - pointer.y) * 0.05;
 
-      // Clean background wipe
+      // Every easing here used to be a fixed fraction *per frame*, which quietly
+      // ties the speed of the whole sky to the refresh rate: twice as fast on a
+      // 120Hz phone, half speed on anything dropping frames. Work in milliseconds
+      // and it looks the same everywhere. The clamp stops a backgrounded tab from
+      // returning with one enormous step.
+      const dt = Math.min(t - (last || t), 50);
+      last = t;
+      const ease = (tau: number) => 1 - Math.exp(-dt / tau);
+      const step = dt / 16.667; // frames-worth, for the drift below
+
+      warpEase += (warpRef.current - warpEase) * ease(240);
+      pointer.x += (pointer.tx - pointer.x) * ease(290);
+      pointer.y += (pointer.ty - pointer.y) * ease(290);
+
+      // Everything below composites additively, so this wipe is the only thing
+      // holding the light back: each frame keeps (1 - alpha) of the last one and
+      // adds more, settling at roughly light/alpha. At the old 0.18 that meant
+      // five times the per-frame brightness, and the warp bloomed out to a white
+      // screen. Keep the floor high enough that the steady state stays dark.
       ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = `rgba(0,0,0,${0.18 + (1 - warpEase) * 0.82})`;
+      ctx.fillStyle = `rgba(0,0,0,${0.45 + (1 - warpEase) * 0.55})`;
       ctx.fillRect(0, 0, w, h);
 
       const activeColor = colorRef.current;
@@ -273,7 +294,7 @@ export default function Starfield({
       const cy = h / 2;
 
       for (const p of dots) {
-        p.y -= (0.00004 + 0.00012 * p.z) * (reduce ? 0 : 1);
+        p.y -= (0.00004 + 0.00012 * p.z) * (reduce ? 0 : step);
         if (p.y < -0.05) p.y = 1.05;
 
         const px = p.x * w - pointer.x * 26 * p.z;
@@ -286,7 +307,8 @@ export default function Starfield({
           const ex = cx + dx * k;
           const ey = cy + dy * k;
           ctx.strokeStyle = activeColor;
-          ctx.globalAlpha = 0.5 * p.z * warpEase;
+          // every streak points at the centre, so that is where they pile up
+          ctx.globalAlpha = 0.3 * p.z * warpEase;
           ctx.lineWidth = p.r * 0.9;
           ctx.beginPath();
           ctx.moveTo(px, py);
@@ -295,7 +317,9 @@ export default function Starfield({
         }
 
         const twinkle = reduce ? 0.6 : 0.45 + 0.55 * Math.sin(t * 0.0012 + p.tw);
-        ctx.globalAlpha = 0.12 + 0.5 * p.z * twinkle;
+        // the mote fades out as its own streak takes over, so the two never
+        // stack into one bright dot at the head of every line
+        ctx.globalAlpha = (0.12 + 0.5 * p.z * twinkle) * (1 - 0.6 * warpEase);
         ctx.beginPath();
         ctx.arc(px, py, p.r * (0.6 + p.z), 0, Math.PI * 2);
         ctx.fill();

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Avatar from "@/components/Avatar";
 import type { Soul } from "@/components/SoulForge";
 import {
+  deleteMessage,
   hasDb,
   joinRitual,
   leaveRitual,
@@ -106,6 +107,7 @@ export default function RegionView({
   const voice = useVoice(
     region.id,
     soulId ? { id: soulId, name: soul.name || "unnamed", color: soul.color, shape: soul.shape } : null,
+    blockedIds,
   );
   const ritual = useRef<((r: Ritual) => void) | null>(null);
   const dictation = useDictation(setDraft);
@@ -259,6 +261,23 @@ export default function RegionView({
     if (hasDb && soulId) sendResonance(id, soulId).catch(() => {});
   };
 
+  /**
+   * Take back something you said. It leaves the screen immediately — waiting on
+   * a round trip to un-say a thing you regret is the wrong feeling entirely —
+   * and comes back if the database refuses.
+   */
+  const unsay = (id: string, image?: string) => {
+    const before = msgs;
+    setMsgs((m) => m.filter((x) => x.id !== id));
+    cue("whisper");
+    if (!hasDb) return;
+    deleteMessage(id, image).catch((e) => {
+      setMsgs(before);
+      setSpamWarning((e as Error)?.message || "that would not come back");
+      setTimeout(() => setSpamWarning(null), 3000);
+    });
+  };
+
   return (
     <motion.div
       className="absolute inset-0 flex flex-col"
@@ -275,11 +294,14 @@ export default function RegionView({
         style={{ background: `linear-gradient(160deg, ${region.bg} 0%, #04040a 100%)` }}
         transition={{ type: "spring", stiffness: 120, damping: 22 }}
       >
+        {/* no blur-3xl here either: a 64px blur across a full-screen box is the
+            single most expensive thing a phone can be asked to composite, and
+            two soft radial gradients already look identical */}
         <motion.div
           layoutId={`bloom-${region.id}`}
-          className="absolute -inset-24 blur-3xl"
+          className="absolute -inset-24"
           style={{
-            background: `radial-gradient(40% 40% at 75% 5%, ${region.hex}44, transparent 70%), radial-gradient(45% 45% at 10% 95%, ${region.glow}22, transparent 70%)`,
+            background: `radial-gradient(45% 45% at 75% 5%, ${region.hex}44, ${region.hex}1c 55%, transparent 78%), radial-gradient(50% 50% at 10% 95%, ${region.glow}22, ${region.glow}0d 55%, transparent 78%)`,
           }}
         />
       </motion.div>
@@ -390,6 +412,7 @@ export default function RegionView({
                   stack={visible.length - i}
                   accent={region.glow}
                   onResonate={() => resonate(m.id)}
+                  onDelete={m.mine ? () => unsay(m.id, m.image) : undefined}
                   onBlock={m.soulId && !m.mine ? () => onBlock(m.soulId!) : undefined}
                   onReport={
                     m.soulId && !m.mine && soulId
@@ -656,6 +679,7 @@ function Message({
   stack,
   accent,
   onResonate,
+  onDelete,
   onBlock,
   onReport,
   link,
@@ -669,6 +693,8 @@ function Message({
   stack: number;
   accent: string;
   onResonate: () => void;
+  /** only ever passed for your own words */
+  onDelete?: () => void;
   onBlock?: () => void;
   onReport?: (reason: ReportReason) => void;
   link?: RequestStatus;
@@ -698,9 +724,11 @@ function Message({
           }`}
         >
           <span style={{ color: c.glow }}>{m.soul}</span>
-          {onBlock && onReport && (
+          {(onDelete || (onBlock && onReport)) && (
             <MessageMenu
               soulName={m.soul}
+              mine={m.mine}
+              onDelete={onDelete}
               onBlock={onBlock}
               onReport={onReport}
               link={link}

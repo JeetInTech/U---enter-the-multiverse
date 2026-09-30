@@ -29,6 +29,57 @@ body {
   overflow: hidden;
   transition: background 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   -webkit-font-smoothing: antialiased;
+  /* installed on a phone this is an app, and apps do not rubber-band, select
+     their own chrome, or flash a grey box under every tap */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* Text you might actually want to keep is still selectable; nothing else is,
+   because a long-press on a planet should open a world, not a copy menu. */
+button,
+[role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/*
+  viewport-fit=cover lets the sky run under the notch and the home indicator.
+  Everything you can touch has to come back out from under them, so these are
+  the insets the fixed chrome pads itself with. They are 0 on every desktop.
+*/
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+}
+
+.safe-top {
+  padding-top: var(--safe-t);
+}
+.safe-bottom {
+  padding-bottom: var(--safe-b);
+}
+.safe-x {
+  padding-left: var(--safe-l);
+  padding-right: var(--safe-r);
+}
+
+/* pinned corners need the inset added to wherever they already sit */
+.pin-tl {
+  top: calc(1.25rem + var(--safe-t));
+  left: calc(1.25rem + var(--safe-l));
+}
+.pin-tr {
+  top: calc(1.25rem + var(--safe-t));
+  right: calc(1.25rem + var(--safe-r));
+}
+.pin-bl {
+  bottom: calc(1.5rem + var(--safe-b));
+  left: calc(1.5rem + var(--safe-l));
 }
 
 ::selection {

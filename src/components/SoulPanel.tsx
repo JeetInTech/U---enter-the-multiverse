@@ -6,6 +6,7 @@ import Avatar from "@/components/Avatar";
 import type { Soul } from "@/components/SoulForge";
 import { colorOf, rankFor, RANKS, regionOf } from "@/lib/soul";
 import type { ResonanceNotice } from "@/lib/inbox";
+import type { BlockedSoul } from "@/lib/safety";
 
 function timeAgo(isoString: string): string {
   const diff = Math.max(0, Date.now() - new Date(isoString).getTime());
@@ -23,6 +24,8 @@ export default function SoulPanel({
   found,
   open,
   echoes = [],
+  blocked = [],
+  onUnblock,
   onClose,
   onMarkSeen,
   onReshape,
@@ -33,6 +36,9 @@ export default function SoulPanel({
   found: number[];
   open: boolean;
   echoes?: ResonanceNotice[];
+  /** souls this one has silenced — the only place they can be found again */
+  blocked?: BlockedSoul[];
+  onUnblock?: (soulId: string) => void;
   onClose: () => void;
   onMarkSeen?: () => void;
   onReshape: () => void;
@@ -128,6 +134,38 @@ export default function SoulPanel({
                 <p className="mt-2 text-[0.55rem] uppercase tracking-[0.3em] text-mist/30">
                   {next ? `${next.at - lore} more to become ${next.name}` : "you are a Guardian"}
                 </p>
+
+                {/* A block with no way back is a trap you set for yourself, so
+                    every silenced soul stays listed here until you let them go. */}
+                {blocked.length > 0 && (
+                  <div className="mt-7">
+                    <p className="mb-2 text-[0.5rem] tracking-[0.28em] text-mist/35 uppercase">
+                      Silenced · {blocked.length}
+                    </p>
+                    <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                      {blocked.map((b) => {
+                        const bc = colorOf(b.color);
+                        return (
+                          <div
+                            key={b.id}
+                            className="flex items-center gap-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-3 py-2"
+                          >
+                            <Avatar soul={{ shape: b.shape, color: b.color, aura: "glow" }} size={26} />
+                            <p className="min-w-0 flex-1 truncate text-[0.78rem]" style={{ color: bc.glow }}>
+                              {b.name}
+                            </p>
+                            <button
+                              onClick={() => onUnblock?.(b.id)}
+                              className="shrink-0 rounded-full border border-white/10 px-2.5 py-1 text-[0.5rem] tracking-[0.2em] text-mist/50 uppercase transition-colors hover:border-white/35 hover:text-white"
+                            >
+                              Unsilence
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-7 space-y-2">
                   <Row onClick={onReshape} accent={c.glow}>

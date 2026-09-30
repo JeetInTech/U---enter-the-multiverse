@@ -44,7 +44,11 @@ export default function SoulForge({
 
   return (
     <motion.div
-      className="relative grid h-full w-full grid-cols-1 place-items-center gap-8 overflow-y-auto px-6 py-10 md:grid-cols-[1fr_1.1fr] md:px-16"
+      // overflow-x-hidden is load-bearing on a phone: setting only overflow-y
+      // makes the x axis `auto` as well, the avatar's glow spills 35px past the
+      // edge, and the browser then scrolls this box sideways to reveal it —
+      // parking every question permanently off the left of the screen.
+      className="relative grid h-full w-full grid-cols-1 place-items-center gap-8 overflow-x-hidden overflow-y-auto px-6 py-10 md:grid-cols-[1fr_1.1fr] md:px-16"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, filter: "blur(12px)" }}

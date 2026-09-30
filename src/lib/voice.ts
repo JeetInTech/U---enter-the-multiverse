@@ -76,6 +76,12 @@ function sink(): HTMLElement {
 export function useVoice(
   region: string,
   me: { id: string; name: string; color: string; shape: string } | null,
+  /**
+   * Souls this one has blocked. Blocking used to hide only their words, which
+   * left them audible in the same voice channel — the one place it matters most.
+   * They are silenced here and never appear in the room at all.
+   */
+  blockedIds: Set<string> = new Set(),
 ) {
   const [joined, setJoined] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -107,6 +113,21 @@ export function useVoice(
   /** souls you silenced, by soul id so it survives them rejoining on a new tab */
   const muteRef = useRef<Set<string>>(new Set());
   const deafRef = useRef(false);
+  // blocks can change while a call is open, so the loop reads the latest set
+  const blockRef = useRef(blockedIds);
+
+  /** Everything that makes one voice inaudible to you, in one place. */
+  const silenced = useCallback(
+    (soulId: string) =>
+      deafRef.current || muteRef.current.has(soulId) || blockRef.current.has(soulId),
+    [],
+  );
+
+  // blocking someone mid-call should take effect on that call, not the next one
+  useEffect(() => {
+    blockRef.current = blockedIds;
+    audios.current.forEach((el, id) => (el.muted = silenced(who.current.get(id)?.soul ?? "")));
+  }, [blockedIds, silenced]);
 
   /** Attach a level meter so the ring can pulse when someone actually talks. */
   const meter = useCallback((id: string, s: MediaStream) => {
@@ -221,7 +242,7 @@ export function useVoice(
         el.setAttribute("playsinline", "");
         el.srcObject = e.streams[0];
         // a soul you already silenced must not start talking again on reconnect
-        el.muted = deafRef.current || muteRef.current.has(who.current.get(peerId)?.soul ?? "");
+        el.muted = silenced(who.current.get(peerId)?.soul ?? "");
         sink().appendChild(el); // it must be in the document to make any sound
         audios.current.set(peerId, el);
         el.play().catch(() => setError("tap anywhere to let this page play sound"));
@@ -244,7 +265,7 @@ export function useVoice(
           })
           .catch((e) => log("offer failed", e));
     },
-    [me, meter],
+    [me, meter, silenced],
   );
 
   /** Candidates that arrived before the description they belong to. */
@@ -352,6 +373,8 @@ export function useVoice(
       meters.current.forEach((read, id) => {
         const w = who.current.get(id);
         if (!w) return;
+        // blocked souls are gone from the room, not merely quiet in it
+        if (id !== tab() && blockRef.current.has(w.soul)) return;
         now.push({
           id,
           ...w,
@@ -410,10 +433,10 @@ export function useVoice(
     deafRef.current = now;
     setDeafened(now);
     audios.current.forEach(
-      (el, id) => (el.muted = now || muteRef.current.has(who.current.get(id)?.soul ?? "")),
+      (el, id) => (el.muted = now || silenced(who.current.get(id)?.soul ?? "")),
     );
     setMic(!now);
-  }, [setMic]);
+  }, [setMic, silenced]);
 
   /** Silence one soul, for you only. They never learn, which is the point. */
   const toggleMuteSoul = useCallback((soulId: string) => {
@@ -424,9 +447,9 @@ export function useVoice(
     // and only re-renders when a flag like this one actually changed
     muteRef.current = next;
     audios.current.forEach(
-      (el, id) => (el.muted = deafRef.current || next.has(who.current.get(id)?.soul ?? "")),
+      (el, id) => (el.muted = silenced(who.current.get(id)?.soul ?? "")),
     );
-  }, []);
+  }, [silenced]);
 
   // walking out of a region hangs up on it
   useEffect(() => {

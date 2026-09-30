@@ -27,7 +27,13 @@ import {
 } from "@/lib/db";
 import { cue, enterRegion as soundOf, isMuted, onMuteChange, setMuted, wake } from "@/lib/audio";
 import { TAGLINES, colorOf, createVoidRegion, getBusiestRegion, getVoidRegionId, rankFor, regionOf, type Region } from "@/lib/soul";
-import { blockSoul, loadBlocks } from "@/lib/safety";
+import {
+  blockSoul,
+  loadBlocks,
+  loadBlockedSouls,
+  unblockSoul,
+  type BlockedSoul,
+} from "@/lib/safety";
 import {
   answerRequest,
   connected as acceptedOf,
@@ -59,6 +65,7 @@ export default function U() {
   const [gate, setGate] = useState<Region | null>(null);
   const [muted, setMutedState] = useState(false);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  const [blockedSouls, setBlockedSouls] = useState<BlockedSoul[]>([]);
   // every link either way, in every state; the three lists below are views of it
   const [links, setLinks] = useState<KeptSoul[]>([]);
   const [soulLocations, setSoulLocations] = useState<Record<string, string>>({});
@@ -142,6 +149,7 @@ export default function U() {
   useEffect(() => {
     if (!soulId) return;
     loadBlocks(soulId).then(setBlockedIds).catch(() => {});
+    loadBlockedSouls(soulId).then(setBlockedSouls).catch(() => {});
     loadLinks(soulId).then(setLinks).catch(() => {});
     refreshEchoes();
   }, [soulId, refreshEchoes]);
@@ -195,6 +203,7 @@ export default function U() {
     setRegion(null);
     setLinks([]);
     setBlockedIds(new Set());
+    setBlockedSouls([]);
     setSoulLocations({});
     setSoul({ name: "", tagline: TAGLINES[0], shape: "circle", color: "tide", aura: "glow" });
   };
@@ -228,7 +237,24 @@ export default function U() {
   const handleBlock = useCallback(
     (blockedSoulId: string) => {
       setBlockedIds((prev) => new Set([...prev, blockedSoulId]));
-      if (soulId) blockSoul(soulId, blockedSoulId).catch(() => {});
+      if (soulId)
+        blockSoul(soulId, blockedSoulId)
+          // re-read so the profile can name who was silenced, not just count them
+          .then(() => loadBlockedSouls(soulId).then(setBlockedSouls))
+          .catch(() => {});
+    },
+    [soulId],
+  );
+
+  const handleUnblock = useCallback(
+    (targetId: string) => {
+      setBlockedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetId);
+        return next;
+      });
+      setBlockedSouls((prev) => prev.filter((b) => b.id !== targetId));
+      if (soulId) unblockSoul(soulId, targetId).catch(() => {});
     },
     [soulId],
   );
@@ -433,9 +459,13 @@ export default function U() {
           <motion.button
             key="soul-profile-button"
             onClick={() => setPanel(true)}
-            className="absolute bottom-6 left-6 z-40 flex items-center gap-3 rounded-full border border-white/10 bg-black/40 py-2 pr-5 pl-2 backdrop-blur-md transition-colors hover:border-white/30 md:bottom-8 md:left-8"
-            initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            className="pin-bl absolute z-40 flex items-center gap-3 rounded-full border border-white/10 bg-black/40 py-2 pr-5 pl-2 backdrop-blur-md transition-colors hover:border-white/30"
+            // no filter keyframe: Motion leaves `filter: blur(0px)` on the element
+            // forever once the entrance finishes, which keeps this pinned button on
+            // its own compositing layer for the whole session. Opacity and y read
+            // the same and leave nothing behind.
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ delay: 0.5, duration: 0.6 }}
             whileHover={{ scale: 1.03 }}
@@ -474,9 +504,13 @@ export default function U() {
           <motion.div
             key="constellation-button"
             data-constellation
-            className="absolute top-5 right-5 z-50 md:top-6 md:right-6"
-            initial={{ opacity: 0, y: -16, filter: "blur(8px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            className="pin-tr absolute z-50"
+            // same as the profile button: a filter keyframe would leave blur(0px)
+            // pinned here permanently, and this wrapper is also the dropdown's
+            // positioning context — a lingering filter changes what `fixed`
+            // children resolve against, which has already bitten once.
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -16 }}
             transition={{ delay: 0.65, duration: 0.6 }}
           >
@@ -534,7 +568,7 @@ export default function U() {
       {stage !== "enter" && (
         <motion.button
           onClick={() => setMuted(!isMuted())}
-          className="absolute top-5 left-5 z-50 grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/40 text-mist/50 backdrop-blur-md transition-colors hover:border-white/30 hover:text-white md:top-6 md:left-6"
+          className="pin-tl absolute z-50 grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-black/40 text-mist/50 backdrop-blur-md transition-colors hover:border-white/30 hover:text-white"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           whileTap={{ scale: 0.9 }}
@@ -571,6 +605,8 @@ export default function U() {
         found={found}
         open={panel}
         echoes={echoes}
+        blocked={blockedSouls}
+        onUnblock={handleUnblock}
         onClose={() => setPanel(false)}
         onMarkSeen={() => {
           markEchoesSeen();

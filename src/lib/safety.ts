@@ -27,6 +27,24 @@ export async function blockSoul(soulId: string, blockedId: string) {
   await c.from("blocks").insert({ soul_id: soulId, blocked_id: blockedId });
 }
 
+export type BlockedSoul = { id: string; name: string; shape: string; color: string };
+
+/**
+ * The souls you have silenced, with enough of them to recognise.
+ *
+ * Two queries rather than an embed: blocks reaches souls twice, so PostgREST
+ * cannot tell which relationship is meant without a per-project hint.
+ */
+export async function loadBlockedSouls(soulId: string): Promise<BlockedSoul[]> {
+  const c = client();
+  if (!c || !soulId) return [];
+  const { data: rows } = await c.from("blocks").select("blocked_id").eq("soul_id", soulId);
+  const ids = (rows ?? []).map((r) => r.blocked_id as string);
+  if (ids.length === 0) return [];
+  const { data: souls } = await c.from("souls").select("id, name, shape, color").in("id", ids);
+  return (souls ?? []) as BlockedSoul[];
+}
+
 /** Undo a block. */
 export async function unblockSoul(soulId: string, blockedId: string) {
   const c = client();

@@ -12,21 +12,26 @@ import type { RequestStatus } from "@/lib/constellation";
  */
 export default function MessageMenu({
   soulName,
+  mine = false,
   link,
   onKeep,
   onRelease,
   onEnterVoid,
+  onDelete,
   onBlock,
   onReport,
 }: {
   soulName: string;
+  /** your own words: nothing here applies except taking them back */
+  mine?: boolean;
   /** where you stand with this soul: undefined means you have never asked */
   link?: RequestStatus;
   onKeep?: () => void;
   onRelease?: () => void;
   onEnterVoid?: () => void;
-  onBlock: () => void;
-  onReport: (reason: ReportReason) => void;
+  onDelete?: () => void;
+  onBlock?: () => void;
+  onReport?: (reason: ReportReason) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -34,16 +39,21 @@ export default function MessageMenu({
 
   const close = () => {
     setOpen(false);
-    setTimeout(() => setReporting(false), 200);
+    setTimeout(() => {
+      setReporting(false);
+      setConfirming(false);
+    }, 200);
   };
 
+  const [confirming, setConfirming] = useState(false);
+
   const handleBlock = () => {
-    onBlock();
+    onBlock?.();
     close();
   };
 
   const handleReport = (reason: ReportReason) => {
-    onReport(reason);
+    onReport?.(reason);
     setDone(true);
     setTimeout(() => {
       setDone(false);
@@ -104,6 +114,24 @@ export default function MessageMenu({
                     className="mt-1 w-full rounded-xl px-3 py-1.5 text-left text-[0.55rem] tracking-[0.22em] text-mist/35 uppercase hover:text-mist/70"
                   >
                     ← Back
+                  </button>
+                </div>
+              ) : mine ? (
+                <div className="p-1.5">
+                  {/* deleting is not undoable, so it asks once before it happens */}
+                  <button
+                    onClick={() => {
+                      if (!confirming) return setConfirming(true);
+                      onDelete?.();
+                      close();
+                    }}
+                    className={`w-full rounded-xl px-3 py-2.5 text-left text-[0.6rem] tracking-[0.22em] uppercase transition-colors ${
+                      confirming
+                        ? "bg-red-500/15 text-red-300"
+                        : "text-red-300/65 hover:bg-red-500/10 hover:text-red-300"
+                    }`}
+                  >
+                    {confirming ? "Really unsay this?" : "Unsay this"}
                   </button>
                 </div>
               ) : (
