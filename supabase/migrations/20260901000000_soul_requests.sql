@@ -57,5 +57,12 @@ create policy constellations_delete on public.constellations for delete
 do $$
 begin
   alter publication supabase_realtime add table public.constellations;
-exception when duplicate_object then null;
+exception
+  -- Catch everything, not just duplicate_object. The SQL editor runs this file
+  -- as a single transaction, so one uncaught error here silently rolls back the
+  -- status column and every policy above it — the whole migration appears to
+  -- have run and none of it did. Live updates are a nicety; the schema is not,
+  -- and it must not be held hostage to whether this one statement applies.
+  when others then
+    raise notice 'constellations not added to supabase_realtime (%); answers will need a reload', sqlerrm;
 end $$;
